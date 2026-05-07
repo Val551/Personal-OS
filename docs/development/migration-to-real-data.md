@@ -1,6 +1,6 @@
 # Migration to Real Data — V1 → V2
 
-Roadmap to transform the current prototype (in-memory mock data, no auth) into a real, production-grade app with persistent storage, authenticated users, and live integrations with Microsoft Calendar and GitHub.
+Roadmap to transform the current prototype (in-memory mock data, no auth) into a real, production-grade app with persistent storage, authenticated users, and live integrations with Google Calendar and GitHub.
 
 ---
 
@@ -104,9 +104,11 @@ enum TaskStatus { todo doing blocked done }
 
 ---
 
-## 2. Phase 2 — Authentication (NextAuth + Microsoft + GitHub)
+## 2. Phase 2 — Authentication (NextAuth + Google + GitHub)
 
-**Goal**: gate the app behind sign-in. Microsoft for the primary identity (per PRD §7), GitHub linked secondarily for PR data.
+**Goal**: gate the app behind sign-in. Google for the primary identity (CMU is on Google Workspace) and Calendar API tokens. GitHub linked secondarily for PR data.
+
+> **Deviation from the PRD**: the PRD called for Microsoft Entra ID. We're using Google instead because the user's primary calendar lives in Google Calendar, not Outlook. Same NextAuth structure, different provider.
 
 ### 2.1 Set up NextAuth (Auth.js v5)
 
@@ -116,15 +118,19 @@ npm install next-auth@beta
 
 Create `auth.ts` at the repo root with the Auth.js v5 setup. Configure two providers:
 
-- **Microsoft (Azure AD)** — for sign-in and Calendar API tokens.
+- **Google** — for sign-in and Calendar API tokens.
 - **GitHub** — for PR API tokens (linked, not primary).
 
-### 2.2 Microsoft Azure AD app
+### 2.2 Google OAuth client
 
-1. Register an app in the Azure portal → Microsoft Entra ID.
-2. Add redirect URI `https://<host>/api/auth/callback/microsoft-entra-id` (and `localhost` for dev).
-3. Add API permissions: `User.Read`, `Calendars.Read`, `offline_access`.
-4. Generate a client secret. Store `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET`, `AZURE_AD_TENANT_ID` in env.
+1. Open https://console.cloud.google.com → create or pick a project.
+2. **APIs & Services** → **Library** → enable **Google Calendar API**.
+3. **APIs & Services** → **OAuth consent screen** → **External** (unless on a Google Workspace) → fill in the basics.
+4. On the consent screen, add scopes: `openid`, `.../auth/userinfo.email`, `.../auth/userinfo.profile`, `.../auth/calendar.readonly`.
+5. Add yourself as a test user (only matters if the app is in "testing" mode).
+6. **APIs & Services** → **Credentials** → **+ Create credentials** → **OAuth client ID** → **Web application**.
+7. Authorized redirect URI: `http://localhost:3000/api/auth/callback/google` (and your prod host when you deploy).
+8. Store `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` in env.
 
 ### 2.3 GitHub OAuth app
 
@@ -203,51 +209,55 @@ The pages themselves change minimally — `useStore()` calls become `useTasks()`
 
 ---
 
-## 4. Phase 4 — Microsoft Calendar sync
+## 4. Phase 4 — Google Calendar sync
 
-**Goal**: meetings on the dashboard are real Outlook/Teams events, not seed data.
+**Goal**: meetings on the dashboard are real Google Calendar events, not seed data.
 
-### 4.1 Graph API basics
+### 4.1 Google Calendar API basics
 
-- Endpoint: `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=…&endDateTime=…`
-- Auth: bearer token from the user's Microsoft account (Phase 2.4 helper).
-- Returns events with `subject`, `start`, `end`, `location`, `attendees`, `bodyPreview`.
+- Endpoint: `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=…&timeMax=…&singleEvents=true&orderBy=startTime`
+- Auth: bearer token from the user's Google account (Phase 2.4 helper).
+- Returns events with `summary`, `start.dateTime`, `end.dateTime`, `location`, `attendees`, `description`, plus `recurringEventId` for series instances.
+- Recommended client: `googleapis` npm package (`new google.calendar({ version: 'v3', auth })`).
 
 ### 4.2 Sync strategy
 
 **V1 — manual + on-load**:
 - On dashboard load, kick off a background sync if last successful sync > 5 min ago.
-- Pull `calendarView` for `[today - 1d, today + 7d]`.
-- Upsert to `Meeting` table keyed by `(userId, externalId)`.
+- Pull events for `[today - 1d, today + 7d]` with `singleEvents=true` (expands recurring series).
+- Upsert to `Meeting` table keyed by `(userId, externalId)` where `externalId = event.id`.
 
-**V2 — delta sync**:
-- Use the `?$deltaToken=` endpoint to fetch only changes since last sync.
-- Store `deltaLink` per user.
+**V2 — incremental sync via `syncToken`**:
+- First sync: don't pass `syncToken`, store the `nextSyncToken` returned in the last page.
+- Subsequent syncs: pass that token to get only changed events.
+- If Google returns 410 Gone, fall back to a full re-sync.
+- Store the token in `Meeting.calendarSyncToken` (or a dedicated `UserCalendarSync` table).
 
-**V3 — webhooks (subscriptions)**:
-- Microsoft Graph supports change notifications. Higher complexity, deferrable.
+**V3 — push notifications (channels)**:
+- Google Calendar supports `events.watch` for change notifications. Requires a public HTTPS callback URL — easier post-deployment.
 
-### 4.3 Mapping Outlook events → our `Meeting` model
+### 4.3 Mapping Google events → our `Meeting` model
 
-The PRD's `workspace` field has no Microsoft equivalent — derive heuristically:
-- Default to `"internship"` for events on the user's primary work calendar.
-- Allow manual override stored on the local `Meeting` row.
-- Long-term: let users set per-calendar workspace defaults in settings.
+The PRD's `workspace` field has no Google equivalent — derive heuristically:
+- Default to `"internship"` for events on the user's primary calendar.
+- If the user has multiple calendars (work / school / personal), let them map calendars → workspaces in settings.
+- Allow per-event manual override stored on the local `Meeting` row.
 
 ### 4.4 Edge cases to plan for
 
-- Recurring events: Graph returns instances inside `calendarView` — handle each instance, don't dedupe on series id.
-- Cancelled events: soft-delete locally so attached notes/tasks aren't lost.
-- Time zones: Graph returns UTC; convert at render only.
-- Rate limits: 10,000 requests / 10 min / app — should never hit this for personal use, but handle 429 with exponential backoff.
+- **Recurring events**: with `singleEvents=true`, Google expands the series. Each instance has a unique `id` AND a `recurringEventId` pointing to the series. Use the instance `id` as `externalId`.
+- **Cancelled events**: Google marks them with `status: "cancelled"` in delta sync. Soft-delete locally so attached notes/tasks aren't lost.
+- **All-day events**: `start.date` (no time) instead of `start.dateTime`. Skip these from "today's schedule" or render differently.
+- **Time zones**: Google returns events with `start.timeZone`. Convert at render time only — store UTC.
+- **Rate limits**: 1,000,000 queries/day project-wide, 600 queries/min/user. Personal use won't come close.
 
 ### 4.5 Files to add
 
 | Path | Change |
 |---|---|
-| `lib/integrations/microsoft.ts` | Graph client + `syncCalendar(userId)` |
+| `lib/integrations/google.ts` | Calendar client + `syncCalendar(userId)` |
 | `app/api/sync/calendar/route.ts` | POST endpoint that triggers sync |
-| `prisma/schema.prisma` | Add `Meeting.externalId`, `Meeting.calendarSyncToken` |
+| `prisma/schema.prisma` | Already has `Meeting.externalId` and `Meeting.calendarSyncToken` from Phase 1. ✅ |
 
 ---
 
@@ -320,13 +330,11 @@ User-local timing requires storing each user's timezone (capturable on first sig
 
 ```
 DATABASE_URL=
-NEXTAUTH_SECRET=
-NEXTAUTH_URL=
-AZURE_AD_CLIENT_ID=
-AZURE_AD_CLIENT_SECRET=
-AZURE_AD_TENANT_ID=
-GITHUB_CLIENT_ID=
-GITHUB_CLIENT_SECRET=
+AUTH_SECRET=
+AUTH_GOOGLE_ID=
+AUTH_GOOGLE_SECRET=
+AUTH_GITHUB_ID=
+AUTH_GITHUB_SECRET=
 INNGEST_EVENT_KEY=    # if using Inngest
 INNGEST_SIGNING_KEY=
 ```
@@ -335,7 +343,7 @@ INNGEST_SIGNING_KEY=
 
 - [ ] DB migrations run cleanly on a fresh Postgres
 - [ ] OAuth redirect URIs include the production host
-- [ ] Rate-limit-aware sync jobs (don't hammer Microsoft / GitHub)
+- [ ] Rate-limit-aware sync jobs (don't hammer Google / GitHub)
 - [ ] Server-action error boundaries (no white-screening on a Prisma error)
 - [ ] Logging/observability — at minimum capture sync failures
 - [ ] Backups on the database
@@ -357,7 +365,7 @@ Things the PRD already hints at but should be deferred:
 
 These map to PRD §9 — answers shape Phase 4–6:
 
-1. **Calendar sync cadence**: does the user want real-time-ish (webhooks) or "good enough" (10-min polling)? Default: polling.
+1. **Calendar sync cadence**: does the user want real-time-ish (push notifications) or "good enough" (10-min polling)? Default: polling.
 2. **GitHub repo scope**: read all repos the user can access, or maintain an explicit allow-list per workspace? Default: all.
 3. **Workspace assignment for synced events**: heuristic vs. manual. Default: heuristic + override.
 4. **Recap nudging**: silent, in-app, or push notification? Default: silent in V2, escalate later if usage drops off.
@@ -368,10 +376,11 @@ These map to PRD §9 — answers shape Phase 4–6:
 ## 10. Risks & considerations
 
 - **OAuth token refresh failures**: the user gets a stale calendar/PR list silently. Surface a "Re-link account" banner with a clear CTA.
-- **Microsoft Graph quirks**: recurring events are notoriously fiddly. Budget time for testing edge cases.
+- **Google `refresh_token` is one-shot**: it's only returned on the *first* consent. If the user re-consents without `prompt=consent`, no new refresh_token comes back and the app silently breaks once the access_token expires. Fix: always request `prompt=consent` + `access_type=offline` (already wired).
+- **Recurring events**: notoriously fiddly. Budget time for testing edge cases.
 - **GitHub API rate limits**: 5,000 requests/hr authenticated. Per-user it's plenty, but a careless `for-each-PR refresh` loop will burn through it fast.
 - **Data sensitivity**: meeting subjects and PR titles can contain confidential information. At a minimum: HTTPS-only, encrypted DB-at-rest, no third-party analytics on entity content. Consider field-level encryption for note bodies if storing on shared infra.
-- **Compliance**: if this ever becomes more than personal use, the Microsoft Graph scope `Calendars.Read` requires admin consent in many tenants — plan for that approval flow.
+- **Compliance**: if this ever becomes more than personal use, Google requires app verification before non-test users can grant `calendar.readonly` — plan for the verification submission.
 
 ---
 
@@ -380,7 +389,7 @@ These map to PRD §9 — answers shape Phase 4–6:
 | Week | Focus |
 |---|---|
 | 1 | Phase 1 — Prisma schema + migrations. Convert seed to DB. App still uses `useStore`, but reads come from Prisma via a thin adapter. |
-| 2 | Phase 2 — NextAuth with Microsoft + GitHub. Sign-in works, but no integrations yet. |
+| 2 | Phase 2 — NextAuth with Google + GitHub. Sign-in works, but no integrations yet. |
 | 3 | Phase 3 — server actions + React Query. Replace `useStore` everywhere. |
 | 4 | Phase 4 — calendar sync (polling, no webhooks). Live meeting data. |
 | 5 | Phase 5 — GitHub PR sync. Live PR data. |

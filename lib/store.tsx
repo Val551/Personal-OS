@@ -1,7 +1,24 @@
 "use client";
 
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
-import { buildSeed } from "@/lib/mock/seed";
+import {
+  createTaskAction,
+  deleteTaskAction,
+  setTaskStatusAction,
+  toggleTaskCompleteAction,
+  updateTaskAction,
+} from "@/app/actions/tasks";
+import {
+  createNoteAction,
+  deleteNoteAction,
+  updateNoteAction,
+} from "@/app/actions/notes";
+import { saveRecapAction } from "@/app/actions/recap";
+import { resyncPRsAction } from "@/app/actions/prs";
+import {
+  syncCalendarAction,
+  type SyncCalendarResponse,
+} from "@/app/actions/calendar";
 import type {
   Meeting,
   Note,
@@ -14,13 +31,15 @@ import type {
   Workspace,
 } from "@/lib/types";
 
-interface StoreState {
+export interface InitialStoreData {
   tasks: Task[];
   meetings: Meeting[];
   notes: Note[];
   prs: PullRequest[];
   recaps: Recap[];
 }
+
+interface StoreState extends InitialStoreData {}
 
 interface StoreActions {
   createTask: (input: {
@@ -30,11 +49,11 @@ interface StoreActions {
     dueAt?: string;
     linkedMeetingId?: string;
     notes?: string;
-  }) => Task;
-  updateTask: (id: string, patch: Partial<Task>) => void;
-  toggleTaskComplete: (id: string) => void;
-  deleteTask: (id: string) => void;
-  setTaskStatus: (id: string, status: TaskStatus) => void;
+  }) => Promise<Task>;
+  updateTask: (id: string, patch: Partial<Task>) => Promise<void>;
+  toggleTaskComplete: (id: string) => Promise<void>;
+  deleteTask: (id: string) => Promise<void>;
+  setTaskStatus: (id: string, status: TaskStatus) => Promise<void>;
 
   createNote: (input: {
     title?: string;
@@ -42,9 +61,9 @@ interface StoreActions {
     type?: NoteType;
     linkedMeetingId?: string;
     linkedTaskIds?: string[];
-  }) => Note;
-  updateNote: (id: string, patch: Partial<Note>) => void;
-  deleteNote: (id: string) => void;
+  }) => Promise<Note>;
+  updateNote: (id: string, patch: Partial<Note>) => Promise<void>;
+  deleteNote: (id: string) => Promise<void>;
 
   saveRecap: (input: {
     date: string;
@@ -52,9 +71,10 @@ interface StoreActions {
     blockers: string;
     topThree: string;
     carryOver: string;
-  }) => Recap;
+  }) => Promise<Recap>;
 
-  resyncPRs: () => void;
+  resyncPRs: () => Promise<void>;
+  syncCalendar: () => Promise<SyncCalendarResponse["result"]>;
 }
 
 type Store = StoreState & StoreActions;
@@ -62,25 +82,32 @@ type Store = StoreState & StoreActions;
 const StoreContext = createContext<Store | null>(null);
 
 function rid(prefix: string) {
-  return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
+  return `${prefix}_temp_${Math.random().toString(36).slice(2, 9)}`;
 }
 
 function nowIso() {
   return new Date().toISOString();
 }
 
-export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const seed = useMemo(() => buildSeed(), []);
-  const [tasks, setTasks] = useState<Task[]>(seed.tasks);
-  const [meetings, setMeetings] = useState<Meeting[]>(seed.meetings);
-  const [notes, setNotes] = useState<Note[]>(seed.notes);
-  const [prs, setPRs] = useState<PullRequest[]>(seed.prs);
-  const [recaps, setRecaps] = useState<Recap[]>(seed.recaps);
-  const [, setLastSync] = useState<string>(nowIso());
+export function StoreProvider({
+  children,
+  initialData,
+}: {
+  children: React.ReactNode;
+  initialData: InitialStoreData;
+}) {
+  const [tasks, setTasks] = useState<Task[]>(initialData.tasks);
+  const [meetings, setMeetings] = useState<Meeting[]>(initialData.meetings);
+  const [notes, setNotes] = useState<Note[]>(initialData.notes);
+  const [prs, setPRs] = useState<PullRequest[]>(initialData.prs);
+  const [recaps, setRecaps] = useState<Recap[]>(initialData.recaps);
 
-  const createTask = useCallback<StoreActions["createTask"]>((input) => {
-    const t: Task = {
-      id: rid("t"),
+  // ---- Tasks ----------------------------------------------------------
+
+  const createTask = useCallback<StoreActions["createTask"]>(async (input) => {
+    const tempId = rid("t");
+    const optimistic: Task = {
+      id: tempId,
       title: input.title,
       notes: input.notes,
       workspace: input.workspace ?? "personal",
@@ -92,60 +119,124 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       linkedMeetingId: input.linkedMeetingId,
       linkedNoteIds: [],
     };
-    setTasks((prev) => [t, ...prev]);
+    setTasks((prev) => [optimistic, ...prev]);
     if (input.linkedMeetingId) {
       setMeetings((prev) =>
         prev.map((m) =>
-          m.id === input.linkedMeetingId ? { ...m, taskIds: [...m.taskIds, t.id] } : m,
+          m.id === input.linkedMeetingId ? { ...m, taskIds: [...m.taskIds, tempId] } : m,
         ),
       );
     }
-    return t;
+    try {
+      const real = await createTaskAction(input);
+      setTasks((prev) => prev.map((t) => (t.id === tempId ? real : t)));
+      if (input.linkedMeetingId) {
+        setMeetings((prev) =>
+          prev.map((m) =>
+            m.id === input.linkedMeetingId
+              ? { ...m, taskIds: m.taskIds.map((id) => (id === tempId ? real.id : id)) }
+              : m,
+          ),
+        );
+      }
+      return real;
+    } catch (err) {
+      setTasks((prev) => prev.filter((t) => t.id !== tempId));
+      throw err;
+    }
   }, []);
 
-  const updateTask = useCallback<StoreActions["updateTask"]>((id, patch) => {
+  const updateTask = useCallback<StoreActions["updateTask"]>(async (id, patch) => {
+    const before = tasks.find((t) => t.id === id);
     setTasks((prev) =>
       prev.map((t) => (t.id === id ? { ...t, ...patch, updatedAt: nowIso() } : t)),
     );
-  }, []);
+    try {
+      // Map `Partial<Task>` to the server's UpdateTaskInput shape (only safe fields).
+      const real = await updateTaskAction(id, {
+        title: patch.title,
+        notes: patch.notes,
+        workspace: patch.workspace,
+        priority: patch.priority,
+        status: patch.status,
+        dueAt: patch.dueAt === undefined ? undefined : (patch.dueAt ?? null),
+      });
+      setTasks((prev) => prev.map((t) => (t.id === id ? real : t)));
+    } catch (err) {
+      if (before) setTasks((prev) => prev.map((t) => (t.id === id ? before : t)));
+      throw err;
+    }
+  }, [tasks]);
 
-  const toggleTaskComplete = useCallback<StoreActions["toggleTaskComplete"]>((id) => {
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id !== id) return t;
-        const isDone = t.status === "done";
-        return {
-          ...t,
-          status: isDone ? "todo" : "done",
-          completedAt: isDone ? undefined : nowIso(),
-          updatedAt: nowIso(),
-        };
-      }),
-    );
-  }, []);
+  const toggleTaskComplete = useCallback<StoreActions["toggleTaskComplete"]>(
+    async (id) => {
+      const before = tasks.find((t) => t.id === id);
+      setTasks((prev) =>
+        prev.map((t) => {
+          if (t.id !== id) return t;
+          const isDone = t.status === "done";
+          return {
+            ...t,
+            status: isDone ? "todo" : "done",
+            completedAt: isDone ? undefined : nowIso(),
+            updatedAt: nowIso(),
+          };
+        }),
+      );
+      try {
+        const real = await toggleTaskCompleteAction(id);
+        setTasks((prev) => prev.map((t) => (t.id === id ? real : t)));
+      } catch (err) {
+        if (before) setTasks((prev) => prev.map((t) => (t.id === id ? before : t)));
+        throw err;
+      }
+    },
+    [tasks],
+  );
 
-  const setTaskStatus = useCallback<StoreActions["setTaskStatus"]>((id, status) => {
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? {
-              ...t,
-              status,
-              completedAt: status === "done" ? nowIso() : undefined,
-              updatedAt: nowIso(),
-            }
-          : t,
-      ),
-    );
-  }, []);
+  const setTaskStatus = useCallback<StoreActions["setTaskStatus"]>(
+    async (id, status) => {
+      const before = tasks.find((t) => t.id === id);
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === id
+            ? {
+                ...t,
+                status,
+                completedAt: status === "done" ? nowIso() : undefined,
+                updatedAt: nowIso(),
+              }
+            : t,
+        ),
+      );
+      try {
+        const real = await setTaskStatusAction(id, status);
+        setTasks((prev) => prev.map((t) => (t.id === id ? real : t)));
+      } catch (err) {
+        if (before) setTasks((prev) => prev.map((t) => (t.id === id ? before : t)));
+        throw err;
+      }
+    },
+    [tasks],
+  );
 
-  const deleteTask = useCallback<StoreActions["deleteTask"]>((id) => {
+  const deleteTask = useCallback<StoreActions["deleteTask"]>(async (id) => {
+    const before = tasks.find((t) => t.id === id);
     setTasks((prev) => prev.filter((t) => t.id !== id));
-  }, []);
+    try {
+      await deleteTaskAction(id);
+    } catch (err) {
+      if (before) setTasks((prev) => [before, ...prev]);
+      throw err;
+    }
+  }, [tasks]);
 
-  const createNote = useCallback<StoreActions["createNote"]>((input) => {
-    const n: Note = {
-      id: rid("n"),
+  // ---- Notes ----------------------------------------------------------
+
+  const createNote = useCallback<StoreActions["createNote"]>(async (input) => {
+    const tempId = rid("n");
+    const optimistic: Note = {
+      id: tempId,
       title: input.title?.trim() || "Untitled note",
       body: input.body ?? "",
       type: input.type ?? "general",
@@ -154,55 +245,89 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       linkedMeetingId: input.linkedMeetingId,
       linkedTaskIds: input.linkedTaskIds ?? [],
     };
-    setNotes((prev) => [n, ...prev]);
+    setNotes((prev) => [optimistic, ...prev]);
     if (input.linkedMeetingId) {
       setMeetings((prev) =>
         prev.map((m) =>
-          m.id === input.linkedMeetingId ? { ...m, noteIds: [...m.noteIds, n.id] } : m,
+          m.id === input.linkedMeetingId ? { ...m, noteIds: [...m.noteIds, tempId] } : m,
         ),
       );
     }
-    return n;
+    try {
+      const real = await createNoteAction(input);
+      setNotes((prev) => prev.map((n) => (n.id === tempId ? real : n)));
+      if (input.linkedMeetingId) {
+        setMeetings((prev) =>
+          prev.map((m) =>
+            m.id === input.linkedMeetingId
+              ? { ...m, noteIds: m.noteIds.map((id) => (id === tempId ? real.id : id)) }
+              : m,
+          ),
+        );
+      }
+      return real;
+    } catch (err) {
+      setNotes((prev) => prev.filter((n) => n.id !== tempId));
+      throw err;
+    }
   }, []);
 
-  const updateNote = useCallback<StoreActions["updateNote"]>((id, patch) => {
+  const updateNote = useCallback<StoreActions["updateNote"]>(async (id, patch) => {
+    const before = notes.find((n) => n.id === id);
     setNotes((prev) =>
       prev.map((n) => (n.id === id ? { ...n, ...patch, updatedAt: nowIso() } : n)),
     );
-  }, []);
-
-  const deleteNote = useCallback<StoreActions["deleteNote"]>((id) => {
-    setNotes((prev) => prev.filter((n) => n.id !== id));
-  }, []);
-
-  const saveRecap = useCallback<StoreActions["saveRecap"]>((input) => {
-    const existing = recaps.find((r) => r.date === input.date);
-    if (existing) {
-      const updated: Recap = {
-        ...existing,
-        ...input,
-        updatedAt: nowIso(),
-      };
-      setRecaps((prev) => prev.map((r) => (r.id === existing.id ? updated : r)));
-      return updated;
+    try {
+      const real = await updateNoteAction(id, {
+        title: patch.title,
+        body: patch.body,
+        type: patch.type,
+      });
+      setNotes((prev) => prev.map((n) => (n.id === id ? real : n)));
+    } catch (err) {
+      if (before) setNotes((prev) => prev.map((n) => (n.id === id ? before : n)));
+      throw err;
     }
-    const r: Recap = {
-      id: rid("r"),
-      date: input.date,
-      accomplishments: input.accomplishments,
-      blockers: input.blockers,
-      topThree: input.topThree,
-      carryOver: input.carryOver,
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-    };
-    setRecaps((prev) => [r, ...prev]);
-    return r;
-  }, [recaps]);
+  }, [notes]);
 
-  const resyncPRs = useCallback<StoreActions["resyncPRs"]>(() => {
-    setLastSync(nowIso());
-    setPRs((prev) => prev.map((p) => ({ ...p, updatedAt: nowIso() })));
+  const deleteNote = useCallback<StoreActions["deleteNote"]>(async (id) => {
+    const before = notes.find((n) => n.id === id);
+    setNotes((prev) => prev.filter((n) => n.id !== id));
+    try {
+      await deleteNoteAction(id);
+    } catch (err) {
+      if (before) setNotes((prev) => [before, ...prev]);
+      throw err;
+    }
+  }, [notes]);
+
+  // ---- Recap ----------------------------------------------------------
+
+  const saveRecap = useCallback<StoreActions["saveRecap"]>(async (input) => {
+    const real = await saveRecapAction(input);
+    setRecaps((prev) => {
+      const idx = prev.findIndex((r) => r.date === real.date);
+      if (idx >= 0) {
+        const next = prev.slice();
+        next[idx] = real;
+        return next;
+      }
+      return [real, ...prev];
+    });
+    return real;
+  }, []);
+
+  // ---- PRs ------------------------------------------------------------
+
+  const resyncPRs = useCallback<StoreActions["resyncPRs"]>(async () => {
+    const real = await resyncPRsAction();
+    setPRs(real);
+  }, []);
+
+  const syncCalendar = useCallback<StoreActions["syncCalendar"]>(async () => {
+    const { result, meetings: fresh } = await syncCalendarAction();
+    setMeetings(fresh);
+    return result;
   }, []);
 
   const value = useMemo<Store>(
@@ -222,6 +347,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteNote,
       saveRecap,
       resyncPRs,
+      syncCalendar,
     }),
     [
       tasks,
@@ -239,6 +365,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteNote,
       saveRecap,
       resyncPRs,
+      syncCalendar,
     ],
   );
 

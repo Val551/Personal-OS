@@ -1,6 +1,6 @@
 import NextAuth from "next-auth";
 import GitHub from "next-auth/providers/github";
-import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
+import Google from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db";
 import authConfig from "@/auth.config";
@@ -10,14 +10,19 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   adapter: PrismaAdapter(prisma),
   session: { strategy: "jwt" },
   providers: [
-    MicrosoftEntraID({
-      clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID,
-      clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET,
-      issuer: process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER,
+    Google({
+      clientId: process.env.AUTH_GOOGLE_ID,
+      clientSecret: process.env.AUTH_GOOGLE_SECRET,
       authorization: {
         params: {
-          // Calendars.Read powers Phase 4. offline_access keeps refresh tokens.
-          scope: "openid profile email offline_access User.Read Calendars.Read",
+          // openid/email/profile = identity. calendar.readonly powers Phase 4.
+          // access_type=offline + prompt=consent are required to get a
+          // refresh_token from Google (otherwise the access_token dies in 1h
+          // and can't be refreshed).
+          scope:
+            "openid email profile https://www.googleapis.com/auth/calendar.readonly",
+          access_type: "offline",
+          prompt: "consent",
         },
       },
       // Single-user app: matching email links to the seeded User row so the

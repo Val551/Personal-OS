@@ -146,8 +146,8 @@ model Meeting {
   updatedAt   DateTime  @updatedAt
 
   // Calendar sync (Phase 4)
-  externalId        String? // Microsoft Graph event id
-  calendarSyncToken String? // delta token for incremental sync
+  externalId        String? // Google Calendar event id
+  calendarSyncToken String? // nextSyncToken for incremental sync (Phase 4 V2)
 
   // Relations
   user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
