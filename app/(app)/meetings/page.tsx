@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { format, isToday, isTomorrow, isAfter } from "date-fns";
-import { ChevronRight, MapPin, Users } from "lucide-react";
+import { ChevronRight, MapPin, Users, RefreshCw } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { Surface } from "@/components/ui/Surface";
 import { Badge } from "@/components/ui/Badge";
@@ -12,7 +12,25 @@ import { formatTime } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
 export default function MeetingsPage() {
-  const { meetings } = useStore();
+  const { meetings, syncCalendar } = useStore();
+  const [isSyncing, startSync] = useTransition();
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+
+  const handleSync = () => {
+    setSyncStatus(null);
+    startSync(async () => {
+      try {
+        const result = await syncCalendar();
+        setSyncStatus(
+          `synced · ${result.upserted} upserted · ${result.cancelled} removed`,
+        );
+      } catch (err) {
+        setSyncStatus(
+          err instanceof Error ? `error · ${err.message}` : "error",
+        );
+      }
+    });
+  };
 
   const sorted = useMemo(
     () => meetings.slice().sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()),
@@ -37,18 +55,34 @@ export default function MeetingsPage() {
 
   return (
     <div className="mx-auto flex max-w-[1100px] flex-col gap-6">
-      <header className="pt-2 animate-fade-up">
-        <p className="comment-label">calendar · upcoming</p>
-        <h1 className="mt-1 font-display text-[52px] leading-[0.95] tracking-tightest-display text-ink">
-          Meetings<span className="text-amber">.</span>
-        </h1>
-        <p className="mt-2 font-mono text-[12px] text-ink-muted">
-          <span className="text-ink">{meetings.length}</span> total ·{" "}
-          <span className="text-amber">
-            {meetings.filter((m) => isToday(new Date(m.startAt))).length}
-          </span>{" "}
-          today
-        </p>
+      <header className="flex items-end justify-between pt-2 animate-fade-up">
+        <div>
+          <p className="comment-label">calendar · upcoming</p>
+          <h1 className="mt-1 font-display text-[52px] leading-[0.95] tracking-tightest-display text-ink">
+            Meetings<span className="text-amber">.</span>
+          </h1>
+          <p className="mt-2 font-mono text-[12px] text-ink-muted">
+            <span className="text-ink">{meetings.length}</span> total ·{" "}
+            <span className="text-amber">
+              {meetings.filter((m) => isToday(new Date(m.startAt))).length}
+            </span>{" "}
+            today
+            {syncStatus && (
+              <span className="ml-3 text-ink-dim">{syncStatus}</span>
+            )}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleSync}
+          disabled={isSyncing}
+          className="flex items-center gap-2 rounded-md border border-hairline bg-elevated/40 px-3 py-2 font-mono text-[11px] text-ink-muted transition-colors hover:border-ink-dim hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber disabled:opacity-50"
+        >
+          <RefreshCw
+            className={cn("h-3.5 w-3.5", isSyncing && "animate-spin")}
+          />
+          {isSyncing ? "syncing…" : "sync calendar"}
+        </button>
       </header>
 
       <div className="flex flex-col gap-8">

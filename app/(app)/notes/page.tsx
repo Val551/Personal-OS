@@ -59,8 +59,8 @@ function NotesPageInner() {
     [active, tasks],
   );
 
-  const handleCreate = () => {
-    const n = createNote({ type: "general", title: "Untitled note", body: "" });
+  const handleCreate = async () => {
+    const n = await createNote({ type: "general", title: "Untitled note", body: "" });
     setActiveId(n.id);
   };
 
