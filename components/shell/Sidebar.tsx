@@ -7,11 +7,14 @@ import {
   CheckSquare,
   GitPullRequest,
   Home,
+  LogOut,
   NotebookText,
   Search,
   Sunrise,
 } from "lucide-react";
+import type { Session } from "next-auth";
 import { cn } from "@/lib/cn";
+import { signOutAction } from "@/lib/auth/actions";
 
 const ITEMS: {
   href: string;
@@ -28,8 +31,16 @@ const ITEMS: {
   { href: "/search", label: "Search", Icon: Search, shortcut: "G S" },
 ];
 
-export function Sidebar() {
+export function Sidebar({ session }: { session: Session }) {
   const pathname = usePathname();
+  const user = session.user;
+  const initials = (user?.name ?? user?.email ?? "?")
+    .split(/\s+|@/)
+    .filter(Boolean)
+    .map((s) => s[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 
   return (
     <aside className="sticky top-0 flex h-screen w-[232px] shrink-0 flex-col border-r border-hairline bg-panel/60 backdrop-blur-sm">
@@ -122,14 +133,34 @@ export function Sidebar() {
       {/* Spacer + user chip */}
       <div className="flex-1" />
       <div className="m-3 flex items-center gap-2.5 rounded-md border border-hairline bg-elevated/60 p-2.5">
-        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-amber/20 font-mono text-[11px] text-amber">
-          FC
-        </div>
+        {user?.image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={user.image}
+            alt={user.name ?? ""}
+            className="h-7 w-7 rounded-full object-cover"
+          />
+        ) : (
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-amber/20 font-mono text-[11px] text-amber">
+            {initials}
+          </div>
+        )}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[12px] text-ink">Fabio Campos</p>
-          <p className="truncate font-mono text-[10px] text-ink-dim">fabiocam@cmu</p>
+          <p className="truncate text-[12px] text-ink">{user?.name ?? "Anonymous"}</p>
+          <p className="truncate font-mono text-[10px] text-ink-dim">
+            {user?.email ?? "unknown"}
+          </p>
         </div>
-        <kbd className="kbd">⌘ K</kbd>
+        <form action={signOutAction}>
+          <button
+            type="submit"
+            className="rounded-md p-1.5 text-ink-dim transition-colors hover:bg-elevated hover:text-urgent"
+            aria-label="Sign out"
+            title="Sign out"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+          </button>
+        </form>
       </div>
     </aside>
   );

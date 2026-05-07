@@ -1,4 +1,4 @@
-import type { Meeting, Note, PullRequest, Recap, Task } from "@/lib/types";
+import type { Meeting, Note, PullRequest, Recap, Task } from "../types";
 
 // All timestamps are anchored to "now" so the demo always feels current.
 // Resolved at load time in the store provider.

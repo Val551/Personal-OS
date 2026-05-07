@@ -4,8 +4,15 @@ import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { CommandMenu } from "./CommandMenu";
 import { useEffect, useState } from "react";
+import type { Session } from "next-auth";
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  session,
+}: {
+  children: React.ReactNode;
+  session: Session;
+}) {
   const [cmdOpen, setCmdOpen] = useState(false);
 
   useEffect(() => {
@@ -21,7 +28,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar />
+      <Sidebar session={session} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onOpenCmd={() => setCmdOpen(true)} />
         <main className="relative flex-1 px-8 pb-20 pt-6">{children}</main>
