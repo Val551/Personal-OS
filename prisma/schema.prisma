@@ -1,0 +1,226 @@
+// Personal Engineering OS — database schema
+// Translated from lib/types.ts. See docs/development/migration-to-real-data.md
+// for context.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = []
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =====================================================================
+// User
+// =====================================================================
+// NextAuth tables (Account / Session / VerificationToken) are intentionally
+// not included here yet — they land in Phase 2 alongside the auth wiring.
+// User backrefs to those tables will be added at the same time.
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  image     String?
+  timezone  String?  // e.g. "America/New_York" — captured on first sign-in (see Phase 6)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tasks        Task[]
+  meetings     Meeting[]
+  notes        Note[]
+  pullRequests PullRequest[]
+  recaps       Recap[]
+}
+
+// =====================================================================
+// Task
+// =====================================================================
+
+enum Workspace {
+  internship
+  school
+  personal
+  club
+}
+
+enum Priority {
+  low
+  med
+  high
+  urgent
+}
+
+enum TaskStatus {
+  todo
+  doing
+  blocked
+  done
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  userId      String
+  title       String
+  notes       String?
+  workspace   Workspace
+  priority    Priority
+  status      TaskStatus
+  dueAt       DateTime?
+  completedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  // Relations
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkedMeetingId String?
+  linkedMeeting   Meeting? @relation(fields: [linkedMeetingId], references: [id], onDelete: SetNull)
+  linkedNotes     Note[]   @relation("TaskNotes")
+
+  @@index([userId, status])
+  @@index([userId, dueAt])
+  @@index([userId, workspace])
+  @@index([linkedMeetingId])
+}
+
+// =====================================================================
+// Meeting
+// =====================================================================
+
+model Meeting {
+  id          String    @id @default(cuid())
+  userId      String
+  title       String
+  startAt     DateTime
+  endAt       DateTime
+  location    String?
+  attendees   String[]
+  description String?
+  workspace   Workspace
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Calendar sync (Phase 4)
+  externalId        String? // Microsoft Graph event id
+  calendarSyncToken String? // delta token for incremental sync
+
+  // Relations
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notes Note[]
+  tasks Task[]
+
+  @@unique([userId, externalId])
+  @@index([userId, startAt])
+}
+
+// =====================================================================
+// Note
+// =====================================================================
+
+enum NoteType {
+  meeting
+  worklog
+  general
+  journal
+}
+
+model Note {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  body      String
+  type      NoteType
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkedMeetingId String?
+  linkedMeeting   Meeting? @relation(fields: [linkedMeetingId], references: [id], onDelete: SetNull)
+  linkedTasks     Task[]   @relation("TaskNotes")
+
+  @@index([userId, type])
+  @@index([userId, updatedAt])
+  @@index([linkedMeetingId])
+}
+
+// =====================================================================
+// PullRequest
+// =====================================================================
+
+enum PRState {
+  open
+  draft
+  merged
+  closed
+}
+
+enum PRBucket {
+  authored
+  review_requested
+  assigned
+  stale
+}
+
+enum CIStatus {
+  passing
+  failing
+  pending
+  none
+}
+
+// Note: createdAt / updatedAt on this model are GitHub's timestamps
+// (synced from the API), NOT row creation/update times. lastSyncedAt
+// tracks when we last refreshed the row locally.
+model PullRequest {
+  id           String   @id @default(cuid())
+  userId       String
+  externalId   String? // GitHub global node id (Phase 5)
+  number       Int
+  repo         String
+  title        String
+  state        PRState
+  bucket       PRBucket
+  author       String
+  reviewers    String[]
+  htmlUrl      String
+  additions    Int
+  deletions    Int
+  comments     Int
+  ciStatus     CIStatus
+  createdAt    DateTime // GitHub's createdAt
+  updatedAt    DateTime // GitHub's updatedAt
+  lastSyncedAt DateTime @default(now()) @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, externalId])
+  @@unique([userId, repo, number])
+  @@index([userId, bucket])
+  @@index([userId, updatedAt])
+}
+
+// =====================================================================
+// Recap
+// =====================================================================
+
+// One recap per user per day. `date` is yyyy-MM-dd in the user's local tz.
+model Recap {
+  id              String   @id @default(cuid())
+  userId          String
+  date            String   // yyyy-MM-dd
+  accomplishments String
+  blockers        String
+  topThree        String
+  carryOver       String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([userId, date])
+}
