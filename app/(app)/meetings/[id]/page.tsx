@@ -41,7 +41,7 @@ export default function MeetingDetail() {
   if (!meeting) {
     return (
       <div className="mx-auto max-w-2xl pt-20 text-center">
-        <p className="font-mono text-[12px] text-ink-dim">{"// meeting not found"}</p>
+        <p className="text-[12px] text-muted-foreground">Meeting not found.</p>
         <Link
           href="/meetings"
           className="mt-3 inline-flex items-center gap-1 font-mono text-[12px] text-amber"
@@ -68,7 +68,7 @@ export default function MeetingDetail() {
     createNote({
       title: `Notes — ${meeting.title}`,
       body: noteBody.trim(),
-      type: "meeting",
+      type: "general",
       linkedMeetingId: meeting.id,
     });
     setNoteBody("");
@@ -156,7 +156,7 @@ export default function MeetingDetail() {
             <textarea
               value={noteBody}
               onChange={(e) => setNoteBody(e.target.value)}
-              placeholder="// jot the standup, decisions, follow-ups…"
+              placeholder="Jot the standup, decisions, follow-ups…"
               rows={4}
               className="w-full resize-none rounded-md border border-hairline bg-base px-3 py-2 font-mono text-[12px] leading-relaxed text-ink placeholder:text-ink-dim focus:border-edge focus:outline-none"
             />

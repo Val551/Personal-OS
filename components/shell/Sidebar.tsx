@@ -9,7 +9,6 @@ import {
   Home,
   LogOut,
   NotebookText,
-  Search,
   Settings,
   Sunrise,
 } from "lucide-react";
@@ -30,7 +29,6 @@ const ITEMS: {
   { href: "/notes", label: "Notes", Icon: NotebookText },
   { href: "/github", label: "GitHub", Icon: GitPullRequest },
   { href: "/recap", label: "Recap", Icon: Sunrise },
-  { href: "/search", label: "Search", Icon: Search },
   { href: "/settings", label: "Settings", Icon: Settings },
 ];
 
@@ -51,22 +49,14 @@ export function Sidebar({ session }: { session: Session }) {
         <div className="flex h-8 w-8 items-center justify-center rounded-md bg-foreground text-background">
           <span className="text-xs font-semibold tracking-tighter">eo</span>
         </div>
-        <div className="flex flex-col leading-none">
-          <span className="text-sm font-semibold tracking-tight">
-            engineering.os
-          </span>
-          <span className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-            v0.1 · personal
-          </span>
-        </div>
+        <span className="text-sm font-semibold tracking-tight">
+          engineering.os
+        </span>
       </div>
 
       <Separator className="mx-5 mt-5 w-auto" />
 
       <nav className="mt-3 flex flex-col gap-px px-3">
-        <p className="px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          workspace
-        </p>
         {ITEMS.map(({ href, label, Icon }) => {
           const active =
             href === "/" ? pathname === "/" : pathname.startsWith(href);

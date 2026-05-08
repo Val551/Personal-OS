@@ -7,16 +7,28 @@ import { Plus, Trash2 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { Surface } from "@/components/ui/Surface";
 import { Badge } from "@/components/ui/Badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { type NoteType } from "@/lib/types";
+import {
+  buildDailyLogNote,
+  parseDailyLog,
+  serializeDailyLog,
+  type DailyLogSections,
+} from "@/lib/notes/templates";
+import { AutoGrowTextarea } from "@/components/notes/auto-grow-textarea";
+import { DailyLogEditor } from "@/components/notes/daily-log-editor";
 import { cn } from "@/lib/cn";
 
-const TYPES: (NoteType | "all")[] = ["all", "meeting", "worklog", "general", "journal"];
+const TYPES: (NoteType | "all")[] = ["all", "worklog", "general"];
 
 const TYPE_TONE: Record<NoteType, "amber" | "warn" | "link" | "ok"> = {
-  meeting: "link",
   worklog: "amber",
   general: "warn",
-  journal: "ok",
 };
 
 export default function NotesPage() {
@@ -35,6 +47,11 @@ function NotesPageInner() {
   const [filter, setFilter] = useState<(typeof TYPES)[number]>("all");
   const [activeId, setActiveId] = useState<string | null>(focusId ?? notes[0]?.id ?? null);
 
+  // Local draft state for the editor — keeps typing snappy. The server-side
+  // save is debounced so we're not firing a Prisma write per keystroke.
+  const [titleDraft, setTitleDraft] = useState("");
+  const [bodyDraft, setBodyDraft] = useState("");
+
   useEffect(() => {
     if (!activeId && notes[0]) setActiveId(notes[0].id);
   }, [notes, activeId]);
@@ -49,6 +66,34 @@ function NotesPageInner() {
 
   const active = useMemo(() => notes.find((n) => n.id === activeId) ?? null, [notes, activeId]);
 
+  // Sync drafts when switching notes (or when the active note is created /
+  // first loaded). Don't sync on every store update — we want server data
+  // to flow in only when the active id changes.
+  useEffect(() => {
+    if (active) {
+      setTitleDraft(active.title);
+      setBodyDraft(active.body);
+    } else {
+      setTitleDraft("");
+      setBodyDraft("");
+    }
+  }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounced save: 500ms after the last keystroke, push the diff up.
+  useEffect(() => {
+    if (!active) return;
+    const titleChanged = titleDraft !== active.title;
+    const bodyChanged = bodyDraft !== active.body;
+    if (!titleChanged && !bodyChanged) return;
+    const handle = setTimeout(() => {
+      const patch: { title?: string; body?: string } = {};
+      if (titleChanged) patch.title = titleDraft;
+      if (bodyChanged) patch.body = bodyDraft;
+      updateNote(active.id, patch);
+    }, 500);
+    return () => clearTimeout(handle);
+  }, [titleDraft, bodyDraft, active, updateNote]);
+
   const linkedMeeting = useMemo(
     () => (active?.linkedMeetingId ? meetings.find((m) => m.id === active.linkedMeetingId) : null),
     [active, meetings],
@@ -59,9 +104,44 @@ function NotesPageInner() {
     [active, tasks],
   );
 
-  const handleCreate = async () => {
+  // If this is a worklog note whose body parses as our daily-log template,
+  // render the structured editor. Otherwise fall back to a plain textarea.
+  const dailyLog = useMemo<DailyLogSections | null>(
+    () => (active?.type === "worklog" ? parseDailyLog(bodyDraft) : null),
+    [active?.type, bodyDraft],
+  );
+
+  const handleSectionChange = (
+    key: keyof DailyLogSections,
+    value: string,
+  ) => {
+    if (!dailyLog) return;
+    setBodyDraft(serializeDailyLog({ ...dailyLog, [key]: value }));
+  };
+
+  // Flush any pending edits on the active note before switching away. Without
+  // this, fast click-to-another-note loses the last <500ms of typing.
+  const flushAndSelect = (nextId: string | null) => {
+    if (active) {
+      const patch: { title?: string; body?: string } = {};
+      if (titleDraft !== active.title) patch.title = titleDraft;
+      if (bodyDraft !== active.body) patch.body = bodyDraft;
+      if (Object.keys(patch).length) updateNote(active.id, patch);
+    }
+    setActiveId(nextId);
+  };
+
+  const handleCreateBlank = async () => {
     const n = await createNote({ type: "general", title: "Untitled note", body: "" });
-    setActiveId(n.id);
+    flushAndSelect(n.id);
+  };
+
+  const handleCreateDailyLog = async () => {
+    const tmpl = buildDailyLogNote();
+    // Stored as type "worklog" — the existing daily-work-log type. No schema
+    // change needed; the template is just a prefilled body.
+    const n = await createNote({ type: "worklog", title: tmpl.title, body: tmpl.body });
+    flushAndSelect(n.id);
   };
 
   return (
@@ -70,27 +150,44 @@ function NotesPageInner() {
         <div>
           <p className="comment-label">capture · all notes</p>
           <h1 className="mt-1 font-display text-[52px] leading-[0.95] tracking-tightest-display text-ink">
-            Notes<span className="text-amber">.</span>
+            Notes
           </h1>
           <p className="mt-2 font-mono text-[12px] text-ink-muted">
             <span className="text-ink">{notes.length}</span> total ·{" "}
-            <span className="text-link">
-              {notes.filter((n) => n.type === "meeting").length}
-            </span>{" "}
-            meeting ·{" "}
             <span className="text-amber">
               {notes.filter((n) => n.type === "worklog").length}
             </span>{" "}
-            worklog
+            worklog ·{" "}
+            <span className="text-warn">
+              {notes.filter((n) => n.type === "general").length}
+            </span>{" "}
+            general
           </p>
         </div>
-        <button
-          onClick={handleCreate}
-          className="inline-flex items-center gap-1.5 rounded-md bg-amber px-3 py-2 font-mono text-[11px] uppercase tracking-wider text-base shadow-glow transition-transform duration-150 ease-spring hover:translate-x-0.5 active:scale-[0.97]"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          new note
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="inline-flex items-center gap-1.5 rounded-md bg-amber px-3 py-2 font-mono text-[11px] uppercase tracking-wider text-base shadow-glow transition-transform duration-150 ease-spring hover:translate-x-0.5 active:scale-[0.97]">
+              <Plus className="h-3.5 w-3.5" />
+              new note
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuItem onClick={handleCreateBlank}>
+              <span className="flex flex-col">
+                <span>Blank note</span>
+                <span className="text-[10px] text-muted-foreground">empty canvas</span>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleCreateDailyLog}>
+              <span className="flex flex-col">
+                <span>Daily log</span>
+                <span className="text-[10px] text-muted-foreground">
+                  internship template
+                </span>
+              </span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[320px_1fr] lg:items-start">
@@ -117,7 +214,7 @@ function NotesPageInner() {
             <ul className="divide-y divide-hairline">
               {filtered.length === 0 && (
                 <li className="px-4 py-8 text-center font-mono text-[12px] text-ink-dim">
-                  {"// no notes match"}
+                  No notes match.
                 </li>
               )}
               {filtered.map((n) => {
@@ -125,7 +222,7 @@ function NotesPageInner() {
                 return (
                   <li key={n.id}>
                     <button
-                      onClick={() => setActiveId(n.id)}
+                      onClick={() => flushAndSelect(n.id)}
                       className={cn(
                         "group flex w-full flex-col items-start gap-1.5 px-4 py-3 text-left transition-colors",
                         isActive ? "bg-elevated" : "hover:bg-elevated/40",
@@ -136,7 +233,7 @@ function NotesPageInner() {
                         <Badge tone={TYPE_TONE[n.type]}>{n.type}</Badge>
                       </div>
                       <p className="line-clamp-2 font-mono text-[11px] leading-snug text-ink-dim">
-                        {n.body || "// empty"}
+                        {n.body || "Empty"}
                       </p>
                       <span className="font-mono text-[10px] text-ink-faint">
                         {format(new Date(n.updatedAt), "EEE LLL d · HH:mm")}
@@ -150,17 +247,17 @@ function NotesPageInner() {
         </div>
 
         {/* Editor */}
-        <Surface className="min-h-[560px] p-6 animate-fade-up stagger-2">
+        <Surface className="p-6 animate-fade-up stagger-2">
           {!active ? (
-            <div className="flex h-full items-center justify-center font-mono text-[12px] text-ink-dim">
-              {"// pick a note"}
+            <div className="flex min-h-[400px] items-center justify-center font-mono text-[12px] text-ink-dim">
+              Pick a note from the list, or create one.
             </div>
           ) : (
-            <div className="flex h-full flex-col gap-4">
+            <div className="flex flex-col gap-4">
               <div className="flex items-center justify-between gap-3">
                 <input
-                  value={active.title}
-                  onChange={(e) => updateNote(active.id, { title: e.target.value })}
+                  value={titleDraft}
+                  onChange={(e) => setTitleDraft(e.target.value)}
                   className="flex-1 bg-transparent font-display text-[28px] leading-tight tracking-tight-display text-ink focus:outline-none"
                 />
                 <div className="flex items-center gap-2">
@@ -171,10 +268,8 @@ function NotesPageInner() {
                     }
                     className="rounded-md border border-hairline bg-base px-2 py-1 font-mono text-[11px] uppercase tracking-wider text-ink-muted focus:border-edge focus:outline-none"
                   >
-                    <option value="meeting">meeting</option>
                     <option value="worklog">worklog</option>
                     <option value="general">general</option>
-                    <option value="journal">journal</option>
                   </select>
                   <button
                     onClick={() => {
@@ -206,12 +301,25 @@ function NotesPageInner() {
                 ))}
               </div>
 
-              <textarea
-                value={active.body}
-                onChange={(e) => updateNote(active.id, { body: e.target.value })}
-                placeholder="// start typing"
-                className="flex-1 resize-none bg-transparent font-mono text-[13.5px] leading-[1.7] text-ink placeholder:text-ink-dim focus:outline-none"
-              />
+              {dailyLog ? (
+                <div className="-mx-1">
+                  <p className="text-[28px] font-semibold leading-tight tracking-tight">
+                    {dailyLog.dateLabel}
+                  </p>
+                  <DailyLogEditor
+                    sections={dailyLog}
+                    onSectionChange={handleSectionChange}
+                  />
+                </div>
+              ) : (
+                <AutoGrowTextarea
+                  value={bodyDraft}
+                  onChange={setBodyDraft}
+                  placeholder="Start typing…"
+                  minRows={6}
+                  className="font-mono text-[13.5px] leading-[1.7] text-ink placeholder:text-ink-dim"
+                />
+              )}
             </div>
           )}
         </Surface>

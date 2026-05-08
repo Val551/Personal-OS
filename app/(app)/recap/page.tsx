@@ -51,7 +51,7 @@ export default function RecapPage() {
         <div>
           <p className="comment-label">end of day · {today}</p>
           <h1 className="mt-1 font-display text-[52px] leading-[0.95] tracking-tightest-display text-ink">
-            Recap<span className="text-amber">.</span>
+            Recap
           </h1>
           <p className="mt-2 font-mono text-[12px] text-ink-muted">
             close the loop. {existing ? "Edit today's recap." : "Reflect, then plan tomorrow."}
@@ -129,7 +129,7 @@ export default function RecapPage() {
         <Surface className="p-5 animate-fade-up stagger-2">
           <SectionHeader comment="yesterday" title="Last seen" />
           {!yesterday ? (
-            <p className="mt-4 font-mono text-[12px] text-ink-dim">{"// no recap yesterday"}</p>
+            <p className="mt-4 text-[12px] text-muted-foreground">No recap yesterday.</p>
           ) : (
             <div className="mt-4 flex flex-col gap-4 font-mono text-[12px]">
               <YPeek heading="shipped" body={yesterday.accomplishments} />
@@ -175,7 +175,7 @@ function RecapField({
         onChange={(e) => onChange(e.target.value)}
         rows={rows}
         className="w-full resize-none rounded-md border border-hairline bg-base px-3 py-2.5 font-mono text-[13px] leading-[1.7] text-ink placeholder:text-ink-dim focus:border-edge focus:outline-none"
-        placeholder="// type here"
+        placeholder="Type here…"
       />
     </div>
   );

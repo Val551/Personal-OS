@@ -32,7 +32,7 @@ export interface Meeting {
   taskIds: string[];
 }
 
-export type NoteType = "meeting" | "worklog" | "general" | "journal";
+export type NoteType = "worklog" | "general";
 
 export interface Note {
   id: string;

@@ -2,10 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { Search } from "lucide-react";
-import { format } from "date-fns";
-import { useEffect, useState } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Separator } from "@/components/ui/separator";
 
 const SEGMENT_LABEL: Record<string, string> = {
   "": "Today",
@@ -14,36 +11,19 @@ const SEGMENT_LABEL: Record<string, string> = {
   notes: "Notes",
   github: "GitHub",
   recap: "Recap",
-  search: "Search",
+  settings: "Settings",
 };
 
 export function Topbar({ onOpenCmd }: { onOpenCmd: () => void }) {
   const pathname = usePathname();
-  const [time, setTime] = useState<string>("");
-
-  useEffect(() => {
-    const tick = () => setTime(format(new Date(), "EEE LLL d · HH:mm"));
-    tick();
-    const id = setInterval(tick, 30 * 1000);
-    return () => clearInterval(id);
-  }, []);
-
   const segments = pathname.split("/").filter(Boolean);
   const top = segments[0] ?? "";
 
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-background/80 px-6 backdrop-blur">
-      <div className="flex items-center gap-2 text-sm">
-        <span className="text-muted-foreground">engineering-os</span>
-        <span className="text-muted-foreground/50">/</span>
-        <span className="font-medium">{SEGMENT_LABEL[top] ?? top}</span>
-        {segments[1] && (
-          <>
-            <span className="text-muted-foreground/50">/</span>
-            <span className="text-muted-foreground">{segments[1]}</span>
-          </>
-        )}
-      </div>
+      <span className="text-sm font-medium">
+        {SEGMENT_LABEL[top] ?? top}
+      </span>
 
       <div className="flex-1" />
 
@@ -57,15 +37,6 @@ export function Topbar({ onOpenCmd }: { onOpenCmd: () => void }) {
           ⌘K
         </kbd>
       </button>
-
-      <Separator orientation="vertical" className="h-6" />
-
-      <span
-        suppressHydrationWarning
-        className="hidden text-xs text-muted-foreground md:inline"
-      >
-        {time || "—"}
-      </span>
 
       <ThemeToggle />
     </header>

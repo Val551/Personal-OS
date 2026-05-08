@@ -6,21 +6,29 @@ Roadmap to transform the current prototype (in-memory mock data, no auth) into a
 
 ## 0. Current state (where we are)
 
-What's built today:
+**Phases 1–5 are shipped.** Phase 6 (background jobs) is next.
 
-- **Frontend**: Next.js 14 (App Router), TypeScript, Tailwind. All 7 PRD routes live (`/`, `/tasks`, `/meetings`, `/meetings/[id]`, `/notes`, `/github`, `/recap`, `/search`).
-- **State**: in-memory React Context store at `lib/store.tsx`, hydrated from `lib/mock/seed.ts` on every page load. No persistence.
-- **Types**: full domain model in `lib/types.ts` (`Workspace`, `Task`, `Meeting`, `Note`, `PullRequest`, `Recap`).
-- **Priority engine**: pure function in `lib/priority/scoreTasks.ts` with 7 unit tests passing — already production-ready, no rewrite needed.
-- **No auth**, no API routes, no database, no real integrations.
+What's running:
 
-Everything below is what needs to change to get real.
+- **Frontend**: Next.js 14 (App Router), TypeScript, Tailwind. 8 routes live: `/`, `/tasks`, `/meetings`, `/meetings/[id]`, `/notes`, `/github`, `/recap`, `/search`, plus `/settings` (account linking) and `/login`.
+- **Design system**: shadcn/ui. Reskinned from the original terminal/serif aesthetic. Dark + light theme via `next-themes`, toggle in topbar.
+- **Database**: Postgres on Neon, accessed via Prisma. Schema in `prisma/schema.prisma` covers `User`, `Account`, `Session`, `Task`, `Meeting`, `Note`, `PullRequest`, `Recap`, plus NextAuth's `VerificationToken`. No mock data anywhere; all seed/fixture files removed.
+- **Auth**: NextAuth.js v5 with Google (OIDC) + GitHub (OAuth). JWT session strategy. `lib/auth/tokens.ts` refreshes Google tokens via `oauth2.googleapis.com/token` when expired.
+- **Account linking**: in-app via `/settings` page. Custom `jwt` callback in `auth.ts` reads the existing JWT cookie before the OAuth callback completes, then force-merges the new provider's account onto the original user — works regardless of email match. Stale-cookie escape hatch at `/api/clear-session` (route handler, since server components can't clear cookies).
+- **State**: `lib/store.tsx` is now hydrated server-side from Prisma in `app/(app)/layout.tsx`, not from mocks. Server actions in `app/actions/*.ts` mutate; the store updates optimistically.
+- **Calendar sync**: `lib/integrations/google.ts` pulls `[today-1d, today+7d]` events via the Calendar API, upserts to `Meeting` keyed by `(userId, externalId)`, soft-deletes cancellations. Manual trigger via "Sync calendar" button on `/meetings`.
+- **PR sync**: `lib/integrations/github.ts` runs one GraphQL request fetching authored / review-requested / assigned buckets (50 each), buckets stale (>7d) post-fetch, replaces the user's PR rows. Triggered from `/github` Sync button.
+- **Priority engine**: `lib/priority/scoreTasks.ts` unchanged from V1 (already production-ready).
+
+What's NOT yet built (Phase 6+): background jobs, deployment, search/full-text indexing.
 
 ---
 
-## 1. Phase 1 — Database (Prisma + Postgres)
+## 1. Phase 1 — Database (Prisma + Postgres) ✅ shipped
 
 **Goal**: replace the seed file with a real Postgres database, accessed via Prisma.
+
+**As built**: schema lives in `prisma/schema.prisma`. Hosted on Neon. `lib/db.ts` exports the singleton client. The seed script (`prisma/seed.ts`) and mock fixtures (`lib/mock/seed.ts`) were later deleted — there's no demo data path anymore; sign in to populate.
 
 ### 1.1 Set up
 
@@ -104,11 +112,19 @@ enum TaskStatus { todo doing blocked done }
 
 ---
 
-## 2. Phase 2 — Authentication (NextAuth + Google + GitHub)
+## 2. Phase 2 — Authentication (NextAuth + Google + GitHub) ✅ shipped
 
 **Goal**: gate the app behind sign-in. Google for the primary identity (CMU is on Google Workspace) and Calendar API tokens. GitHub linked secondarily for PR data.
 
 > **Deviation from the PRD**: the PRD called for Microsoft Entra ID. We're using Google instead because the user's primary calendar lives in Google Calendar, not Outlook. Same NextAuth structure, different provider.
+
+**As built — additions to the original plan**:
+
+- **Login is Google-only.** The `/login` page only shows the Google provider; GitHub is connected from the `/settings` page after sign-in. This avoids the "second provider replaces my session" trap that account-linking by email-match has.
+- **In-app account linking via custom `jwt` callback.** When a signed-in user OAuths into a second provider, `auth.ts` reads the existing JWT cookie inside the `jwt` callback, finds the user, and re-points the just-created `Account` row at them — deleting the duplicate user that PrismaAdapter spawned. Cross-email linking works (your school Google + personal GitHub end up on one user).
+- **Important gotcha — provider type matters.** Google's account type is `"oidc"`, not `"oauth"`. An early version of the callback gated on `account.type === "oauth"`, which meant Google sign-ins skipped the logic and `token.uid` was never set → infinite redirect loop on `/`. The fix: don't gate on type, fire whenever `user && account` are both present.
+- **Stale-cookie escape hatch at `/api/clear-session`.** Server components can't modify cookies in Next.js 14. When the layout detects a JWT pointing to a deleted user, it redirects to this route handler (excluded from middleware) which calls `cookies().delete()` and bounces to `/login`.
+- **Session callback falls back to `token.sub`.** NextAuth auto-sets `sub` on the JWT; our custom callback adds `uid`. Falling back from `uid` → `sub` keeps any pre-existing cookies working through code changes.
 
 ### 2.1 Set up NextAuth (Auth.js v5)
 
@@ -161,9 +177,11 @@ NextAuth's Prisma adapter stores `access_token`, `refresh_token`, and `expires_a
 
 ---
 
-## 3. Phase 3 — Replace the in-memory store with server data
+## 3. Phase 3 — Replace the in-memory store with server data ✅ shipped
 
 **Goal**: every read/write hits Postgres. Optimistic updates keep the UI snappy.
+
+**Deviation from the original plan**: skipped React Query. `lib/store.tsx` is still a React Context store, but it's now hydrated from Prisma in `app/(app)/layout.tsx` (server component) and mutations call server actions directly with optimistic updates handled in the store itself. Simpler than React Query for this app's size; revisit if the cache invalidation story gets messy.
 
 ### 3.1 Server actions (recommended over API routes)
 
@@ -209,9 +227,11 @@ The pages themselves change minimally — `useStore()` calls become `useTasks()`
 
 ---
 
-## 4. Phase 4 — Google Calendar sync
+## 4. Phase 4 — Google Calendar sync ✅ shipped (V1)
 
 **Goal**: meetings on the dashboard are real Google Calendar events, not seed data.
+
+**As built**: V1 (manual sync button on `/meetings`). V2 incremental sync via `nextSyncToken` and V3 push notifications are deferred. All-day events are skipped. Workspace defaults to `"internship"` for every event — per-calendar mapping is V2.
 
 ### 4.1 Google Calendar API basics
 
@@ -261,9 +281,11 @@ The PRD's `workspace` field has no Google equivalent — derive heuristically:
 
 ---
 
-## 5. Phase 5 — GitHub PR sync
+## 5. Phase 5 — GitHub PR sync ✅ shipped (V1)
 
 **Goal**: PRs on the GitHub page are real, bucketed correctly, and refresh on a sensible cadence.
+
+**As built**: V1 with a "replace strategy" — each sync deletes the user's PR rows and re-inserts from the GraphQL response. Capped at 50 PRs per bucket. Manual trigger only (the "Sync" button on `/github`). Webhooks deferred. Used a hand-rolled `fetch` to `api.github.com/graphql` instead of `@octokit/graphql` — one less dep, the query is small enough.
 
 ### 5.1 API choice
 
@@ -301,20 +323,64 @@ Persist PR metadata so the dashboard doesn't block on a network call. Mark with 
 
 ---
 
-## 6. Phase 6 — Background jobs & cron
+## 6. Phase 6 — Background jobs & cron 🔄 next
 
-**Goal**: things that should happen automatically (PR refresh, recap reminder).
+**Goal**: things that should happen automatically — keep calendar + PRs fresh without the user having to click "Sync", and nudge for recap entry.
 
-Recommendation: **Inngest** (free tier, great DX) or **Vercel Cron** (simpler if you're already on Vercel).
+### 6.1 Runtime choice
 
-| Job | Cadence | What it does |
-|---|---|---|
-| `sync-calendars` | every 30 min | Pull deltas for every active user's calendar |
-| `sync-prs` | every hour | Refresh PR buckets for each user |
-| `recap-reminder` | daily at 5pm user-local | Optional — push notification or email if no recap yet today |
-| `mark-stale-prs` | daily | Re-bucket stale PRs based on `updatedAt < now - 7d` |
+Two reasonable options for a personal app:
 
-User-local timing requires storing each user's timezone (capturable on first sign-in via `Intl.DateTimeFormat().resolvedOptions().timeZone`).
+- **Vercel Cron** — zero infra, declared in `vercel.json`, hits a route handler on a schedule. Great if/when we deploy to Vercel. Limitation: 60s execution cap on Hobby plan.
+- **Inngest** — separate service (free tier), durable retries, works locally via dev server. More moving parts but much better debuggability.
+
+Default plan: **Vercel Cron** for V1, with each job implemented as a route handler under `app/api/cron/*` that does its own per-user fan-out. Inngest only if cron jobs start needing > 60s or we want retries/observability.
+
+### 6.2 Jobs
+
+| Job | Endpoint | Cadence | What it does |
+|---|---|---|---|
+| `sync-calendars` | `POST /api/cron/sync-calendars` | every 30 min | Iterate active users, run `syncGoogleCalendar(userId)` for each |
+| `sync-prs` | `POST /api/cron/sync-prs` | hourly | Same fan-out for `syncGitHubPRs(userId)` |
+| `mark-stale-prs` | `POST /api/cron/mark-stale-prs` | daily 03:00 UTC | Re-bucket authored PRs where `updatedAt < now − 7d` to `stale` |
+| `recap-reminder` | `POST /api/cron/recap-reminder` | hourly | If user-local time is 17:00 and no recap exists for today, fire a notification (push or email — TBD per §6.5) |
+
+### 6.3 Securing cron endpoints
+
+Vercel Cron sends an `Authorization: Bearer <CRON_SECRET>` header. The endpoint validates it before doing work. Add `CRON_SECRET` to env. Reject all other callers with 401. (Locally, hit them via `curl -H "Authorization: Bearer $CRON_SECRET"`.)
+
+### 6.4 User timezones
+
+`recap-reminder` and any "user-local" timing needs each user's timezone. Capture on first sign-in via `Intl.DateTimeFormat().resolvedOptions().timeZone` and store on `User.timezone` (the column already exists in the schema). Run the cron hourly UTC and filter to users whose local hour == 17 right now.
+
+### 6.5 Recap reminder delivery — open question
+
+Three options, in order of simplicity:
+
+1. **In-app banner only** — flag is set on the user, dashboard shows "Don't forget your recap" until they post one. Zero infra.
+2. **Email** — needs a transactional provider (Resend, Postmark). Easiest external add. ~5 min setup.
+3. **Web push** — needs a service worker, VAPID keys, user permission grant. Most polished UX, most setup.
+
+Default: ship #1 in V1. Add #2 if the in-app reminder isn't enough. Defer #3 until the app is on a real domain.
+
+### 6.6 Idempotency + concurrency
+
+- Both sync jobs are already idempotent at the row level (calendar uses upsert by `(userId, externalId)`; PRs use replace strategy in a single transaction).
+- One scheduled run shouldn't overlap a previous one. Cap each job at, say, 50s of execution; if there are more users than fit in that budget, paginate by `User.lastSyncedAt` and stop early.
+- Per-user safety: if a user's Google or GitHub token is invalid, log + skip — don't fail the whole run.
+
+### 6.7 Files to add
+
+| Path | Change |
+|---|---|
+| `app/api/cron/sync-calendars/route.ts` | New — fan-out + bearer-auth gate |
+| `app/api/cron/sync-prs/route.ts` | New |
+| `app/api/cron/mark-stale-prs/route.ts` | New |
+| `app/api/cron/recap-reminder/route.ts` | New |
+| `vercel.json` | New — cron schedule declarations |
+| `lib/cron/auth.ts` | New — shared `assertCronCaller(req)` helper |
+| `prisma/schema.prisma` | Add `User.lastCalendarSyncAt`, `User.lastPRSyncAt` for pagination/observability |
+| Capture timezone on first sign-in | small tweak in `auth.ts` `events.signIn` |
 
 ---
 

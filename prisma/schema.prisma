@@ -23,6 +23,8 @@ model User {
   image         String?
   emailVerified DateTime? // Auth.js convention
   timezone      String?   // e.g. "America/New_York" (Phase 6)
+  lastCalendarSyncAt DateTime? // last successful Google Calendar sync (Phase 6)
+  lastPRSyncAt       DateTime? // last successful GitHub PR sync (Phase 6)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -163,10 +165,8 @@ model Meeting {
 // =====================================================================
 
 enum NoteType {
-  meeting
   worklog
   general
-  journal
 }
 
 model Note {

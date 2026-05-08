@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { AppShell } from "@/components/shell/AppShell";
 import { StoreProvider } from "@/lib/store";
+import { TimezoneSync } from "@/components/timezone-sync";
+import { RecapReminderBanner } from "@/components/recap-reminder-banner";
 import {
   serializeMeeting,
   serializeNote,
@@ -21,11 +23,11 @@ export default async function AuthedLayout({
 
   const userId = session.user.id;
 
-  const userExists = await prisma.user.findUnique({
+  const userRow = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true },
+    select: { id: true, timezone: true },
   });
-  if (!userExists) redirect("/api/clear-session");
+  if (!userRow) redirect("/api/clear-session");
 
   const [tasksRaw, meetingsRaw, notesRaw, prsRaw, recapsRaw] = await Promise.all([
     prisma.task.findMany({
@@ -63,7 +65,11 @@ export default async function AuthedLayout({
 
   return (
     <StoreProvider initialData={initialData}>
-      <AppShell session={session}>{children}</AppShell>
+      <TimezoneSync currentTimezone={userRow.timezone} />
+      <AppShell session={session}>
+        <RecapReminderBanner userId={userId} timezone={userRow.timezone} />
+        {children}
+      </AppShell>
     </StoreProvider>
   );
 }

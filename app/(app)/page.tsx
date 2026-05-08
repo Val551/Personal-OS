@@ -1,15 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { format, isAfter, isToday, isWithinInterval, addDays } from "date-fns";
-import { ArrowRight, Plus, Sparkles, ExternalLink } from "lucide-react";
+import { ArrowRight, ExternalLink, Plus, Sparkles } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { Surface } from "@/components/ui/Surface";
 import { Badge } from "@/components/ui/Badge";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { rankTopTasks, scoreTask } from "@/lib/priority/scoreTasks";
-import { formatTime, formatDate, relativeDue, formatPRAge } from "@/lib/format";
+import { formatTime, relativeDue, formatPRAge } from "@/lib/format";
 import { PRIORITY_META, WORKSPACE_META } from "@/lib/types";
 import { cn } from "@/lib/cn";
 
@@ -17,20 +17,6 @@ export default function TodayPage() {
   const { tasks, meetings, prs, createNote, toggleTaskComplete } = useStore();
   const [quickNote, setQuickNote] = useState("");
   const [savedFlash, setSavedFlash] = useState(false);
-  const mountRef = useRef<number | null>(null);
-  if (mountRef.current === null) mountRef.current = Date.now();
-  const [uptime, setUptime] = useState("00m");
-  useEffect(() => {
-    const tick = () => {
-      const ms = Date.now() - (mountRef.current ?? Date.now());
-      const m = Math.floor(ms / 60000);
-      const h = Math.floor(m / 60);
-      setUptime(h > 0 ? `${String(h).padStart(2, "0")}h ${String(m % 60).padStart(2, "0")}m` : `${String(m).padStart(2, "0")}m`);
-    };
-    tick();
-    const id = setInterval(tick, 30000);
-    return () => clearInterval(id);
-  }, []);
 
   const today = useMemo(() => {
     return meetings
@@ -77,48 +63,31 @@ export default function TodayPage() {
 
   return (
     <div className="mx-auto flex max-w-[1280px] flex-col gap-6">
-      {/* HERO --------------------------------------------------------------- */}
-      <header className="flex items-end justify-between pt-2 animate-fade-up">
-        <div>
-          <p className="comment-label">{format(new Date(), "yyyy-MM-dd · HH:mm")}</p>
-          <h1 className="mt-1 font-display text-[64px] leading-[0.95] tracking-tightest-display text-ink">
-            {todayLabel}<span className="text-amber">.</span>
-          </h1>
-          <p className="mt-2 font-mono text-[12px] text-ink-muted">
-            {dateLabel} ·{" "}
-            <span className="text-ink">{today.length}</span> meetings ·{" "}
-            <span className="text-ink">{tasks.filter((t) => t.status !== "done").length}</span> open ·{" "}
-            <span className="text-ok">{completedToday}</span> shipped
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge tone="ok" dot dotColor="#9BB369">
-            on track
-          </Badge>
-          <Badge>
-            uptime{" "}
-            <span className="ml-1 text-ink" suppressHydrationWarning>
-              {uptime}
-            </span>
-          </Badge>
-        </div>
+      <header className="pt-2 animate-fade-up">
+        <h1 className="font-display text-[64px] leading-[0.95] tracking-tightest-display text-ink">
+          {todayLabel}
+        </h1>
+        <p className="mt-2 font-mono text-[12px] text-ink-muted">
+          {dateLabel} ·{" "}
+          <span className="text-ink">{today.length}</span> meetings ·{" "}
+          <span className="text-ink">{tasks.filter((t) => t.status !== "done").length}</span> open ·{" "}
+          <span className="text-ok">{completedToday}</span> shipped
+        </p>
       </header>
 
-      {/* RECOMMENDATION HERO ------------------------------------------------ */}
       {hero && (
         <Surface
           tone="floating"
-          className="hero-glow scanlines relative overflow-hidden p-6 animate-fade-up stagger-1"
+          className="relative p-6 animate-fade-up stagger-1"
         >
           <div className="relative z-10 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div className="flex-1">
-              <div className="mb-3 flex items-center gap-2">
+              <div className="mb-2 flex items-center gap-2">
                 <Sparkles className="h-3.5 w-3.5 text-amber" />
-                <span className="comment-label !text-amber">priority engine · top recommendation</span>
+                <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                  {hero.score.reason}
+                </span>
               </div>
-              <p className="mb-1 font-mono text-[11px] uppercase tracking-wider text-ink-dim">
-                {hero.score.reason}
-              </p>
               <h2 className="font-display text-[34px] leading-[1.05] tracking-tight-display text-ink">
                 {hero.task.title}
               </h2>
@@ -138,10 +107,6 @@ export default function TodayPage() {
                     due <span className="ml-1 text-ink">{relativeDue(hero.task.dueAt)}</span>
                   </Badge>
                 )}
-                <Badge tone="amber">
-                  score{" "}
-                  <span className="ml-1 text-ink">{hero.score.score}</span>
-                </Badge>
               </div>
             </div>
             <Link
@@ -174,8 +139,8 @@ export default function TodayPage() {
           />
           <ul className="mt-4 flex flex-col">
             {today.length === 0 && (
-              <li className="py-8 text-center font-mono text-[12px] text-ink-dim">
-                {"// nothing on the calendar today"}
+              <li className="py-8 text-center text-[12px] text-muted-foreground">
+                Nothing on the calendar today.
               </li>
             )}
             {today.map((m, idx) => {
@@ -256,8 +221,8 @@ export default function TodayPage() {
           />
           <ul className="mt-4 flex flex-col gap-3">
             {prAttention.length === 0 && (
-              <li className="py-6 text-center font-mono text-[12px] text-ink-dim">
-                {"// inbox zero"}
+              <li className="py-6 text-center text-[12px] text-muted-foreground">
+                Inbox zero.
               </li>
             )}
             {prAttention.map((p) => (
@@ -339,9 +304,6 @@ export default function TodayPage() {
                   <Badge dot dotColor={WORKSPACE_META[task.workspace].color}>
                     {WORKSPACE_META[task.workspace].label}
                   </Badge>
-                  <span className="w-12 text-right font-mono text-[10px] tabular text-amber">
-                    {score.score}
-                  </span>
                 </div>
               </li>
             ))}
@@ -357,8 +319,8 @@ export default function TodayPage() {
           />
           <ul className="mt-4 flex flex-col gap-2">
             {deadlines.length === 0 && (
-              <li className="py-6 text-center font-mono text-[12px] text-ink-dim">
-                {"// no upcoming deadlines"}
+              <li className="py-6 text-center text-[12px] text-muted-foreground">
+                No upcoming deadlines.
               </li>
             )}
             {deadlines.map((t) => {
@@ -414,7 +376,7 @@ export default function TodayPage() {
                     handleQuickNote();
                   }
                 }}
-                placeholder="// what's on your mind?"
+                placeholder="What's on your mind?"
                 className="w-full resize-none bg-transparent font-mono text-[13px] leading-relaxed text-ink placeholder:text-ink-dim focus:outline-none"
                 rows={3}
               />

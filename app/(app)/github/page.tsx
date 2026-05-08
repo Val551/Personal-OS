@@ -84,7 +84,7 @@ export default function GitHubPage() {
         <div>
           <p className="comment-label">github · pull requests</p>
           <h1 className="mt-1 font-display text-[52px] leading-[0.95] tracking-tightest-display text-ink">
-            Pull requests<span className="text-amber">.</span>
+            Pull requests
           </h1>
           <p className="mt-2 font-mono text-[12px] text-ink-muted">
             <span className="text-ink">{prs.length}</span> tracked ·{" "}
@@ -137,7 +137,7 @@ export default function GitHubPage() {
               <ul className="mt-4 flex flex-col gap-2.5">
                 {list.length === 0 && (
                   <li className="rounded-md border border-dashed border-hairline px-3 py-6 text-center font-mono text-[11px] text-ink-dim">
-                    {"// inbox zero"}
+                    Inbox zero.
                   </li>
                 )}
                 {list.map((p) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Calendar,
@@ -104,7 +104,7 @@ function TasksPageInner() {
         <div>
           <p className="comment-label">workspace · all tasks</p>
           <h1 className="mt-1 font-display text-[52px] leading-[0.95] tracking-tightest-display text-ink">
-            Tasks<span className="text-amber">.</span>
+            Tasks
           </h1>
           <p className="mt-2 font-mono text-[12px] text-ink-muted">
             <span className="text-ink">{counts.open}</span> open ·{" "}
@@ -188,7 +188,7 @@ function TasksPageInner() {
       <Surface className="overflow-hidden animate-fade-up stagger-3">
         {filtered.length === 0 ? (
           <div className="flex items-center justify-center py-16 font-mono text-[12px] text-ink-dim">
-            {"// nothing matches that filter"}
+            Nothing matches that filter.
           </div>
         ) : (
           <ul className="divide-y divide-hairline">
@@ -360,10 +360,40 @@ function TaskDrawer({
   onChange: (patch: Partial<Task>) => void;
   onDelete: () => void;
 }) {
+  // Local drafts for the text fields so typing is snappy. The select / date
+  // inputs go through onChange directly because they're discrete, low-frequency
+  // changes that don't need debouncing. The drawer is keyed by task.id at the
+  // call site so state naturally resets when switching tasks.
+  const [titleDraft, setTitleDraft] = useState(task.title);
+  const [notesDraft, setNotesDraft] = useState(task.notes ?? "");
+
+  // Debounced save — fires 500ms after the last keystroke.
+  useEffect(() => {
+    const titleChanged = titleDraft !== task.title;
+    const notesChanged = notesDraft !== (task.notes ?? "");
+    if (!titleChanged && !notesChanged) return;
+    const handle = setTimeout(() => {
+      const patch: Partial<Task> = {};
+      if (titleChanged) patch.title = titleDraft;
+      if (notesChanged) patch.notes = notesDraft;
+      onChange(patch);
+    }, 500);
+    return () => clearTimeout(handle);
+  }, [titleDraft, notesDraft, task.title, task.notes, onChange]);
+
+  // Flush pending edits if the drawer closes mid-debounce.
+  const handleClose = () => {
+    const patch: Partial<Task> = {};
+    if (titleDraft !== task.title) patch.title = titleDraft;
+    if (notesDraft !== (task.notes ?? "")) patch.notes = notesDraft;
+    if (Object.keys(patch).length) onChange(patch);
+    onClose();
+  };
+
   return (
     <div
       className="fixed inset-0 z-40 flex justify-end bg-black/50 backdrop-blur-sm"
-      onClick={onClose}
+      onClick={handleClose}
     >
       <div
         className="flex h-full w-full max-w-[480px] flex-col border-l border-edge bg-floating shadow-floating"
@@ -372,7 +402,7 @@ function TaskDrawer({
         <div className="flex items-center justify-between border-b border-hairline px-5 py-3">
           <p className="comment-label">task · {task.id}</p>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="rounded p-1 text-ink-muted transition-colors hover:bg-elevated hover:text-ink"
             aria-label="Close"
           >
@@ -382,8 +412,8 @@ function TaskDrawer({
 
         <div className="flex flex-1 flex-col gap-5 overflow-y-auto p-5">
           <input
-            value={task.title}
-            onChange={(e) => onChange({ title: e.target.value })}
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
             className="bg-transparent font-display text-[26px] leading-tight tracking-tight-display text-ink focus:outline-none"
           />
 
@@ -442,11 +472,11 @@ function TaskDrawer({
 
           <Field label="notes">
             <textarea
-              value={task.notes ?? ""}
-              onChange={(e) => onChange({ notes: e.target.value })}
+              value={notesDraft}
+              onChange={(e) => setNotesDraft(e.target.value)}
               rows={6}
               className="w-full resize-none rounded-md border border-hairline bg-base px-3 py-2 font-mono text-[12px] leading-relaxed text-ink placeholder:text-ink-dim focus:border-edge focus:outline-none"
-              placeholder="// scratch space"
+              placeholder="Scratch space…"
             />
           </Field>
 

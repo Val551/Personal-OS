@@ -12,7 +12,8 @@ export default auth((req) => {
   const isPublic =
     nextUrl.pathname.startsWith("/login") ||
     nextUrl.pathname.startsWith("/api/auth") ||
-    nextUrl.pathname.startsWith("/api/clear-session");
+    nextUrl.pathname.startsWith("/api/clear-session") ||
+    nextUrl.pathname.startsWith("/api/cron");
 
   if (!isAuthed && !isPublic) {
     const url = new URL("/login", nextUrl);

@@ -59,7 +59,7 @@ export default function MeetingsPage() {
         <div>
           <p className="comment-label">calendar · upcoming</p>
           <h1 className="mt-1 font-display text-[52px] leading-[0.95] tracking-tightest-display text-ink">
-            Meetings<span className="text-amber">.</span>
+            Meetings
           </h1>
           <p className="mt-2 font-mono text-[12px] text-ink-muted">
             <span className="text-ink">{meetings.length}</span> total ·{" "}

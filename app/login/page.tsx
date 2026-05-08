@@ -6,7 +6,6 @@ import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -39,14 +38,9 @@ export default async function LoginPage({
           <div className="flex h-9 w-9 items-center justify-center rounded-md bg-foreground text-background">
             <span className="text-sm font-semibold tracking-tighter">eo</span>
           </div>
-          <div className="flex flex-col leading-none">
-            <span className="text-base font-semibold tracking-tight">
-              engineering.os
-            </span>
-            <span className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-              v0.1 · personal
-            </span>
-          </div>
+          <span className="text-base font-semibold tracking-tight">
+            engineering.os
+          </span>
         </div>
 
         <Card>
@@ -79,9 +73,6 @@ export default async function LoginPage({
               after signing in.
             </p>
           </CardContent>
-          <CardFooter className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            localhost · dev
-          </CardFooter>
         </Card>
       </div>
     </div>

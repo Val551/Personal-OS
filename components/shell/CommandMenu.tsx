@@ -26,7 +26,6 @@ const NAV = [
   { href: "/notes", label: "Notes", Icon: NotebookText },
   { href: "/github", label: "GitHub", Icon: GitPullRequest },
   { href: "/recap", label: "Recap", Icon: Sunrise },
-  { href: "/search", label: "Search", Icon: Search },
 ];
 
 const itemCls =

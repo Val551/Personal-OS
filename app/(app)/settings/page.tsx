@@ -23,7 +23,7 @@ export default async function SettingsPage({ searchParams }: PageProps) {
   const userId = await requireUserId();
   const accounts = await prisma.account.findMany({
     where: { userId },
-    select: { provider: true, providerAccountId: true, scope: true },
+    select: { provider: true },
   });
 
   const google = accounts.find((a) => a.provider === "google");
@@ -54,10 +54,9 @@ export default async function SettingsPage({ searchParams }: PageProps) {
 
       <ProviderCard
         title="Google"
-        description="Identity & Calendar API for meeting sync"
+        description="Identity and calendar"
         icon={<GoogleLogo />}
         connected={Boolean(google)}
-        scope={google?.scope}
         connectAction={async () => {
           "use server";
           await signIn("google", { redirectTo: "/settings" });
@@ -68,10 +67,9 @@ export default async function SettingsPage({ searchParams }: PageProps) {
 
       <ProviderCard
         title="GitHub"
-        description="OAuth scope: repo, read:user — used for PR sync"
+        description="Pull request data"
         icon={<Github className="h-5 w-5" />}
         connected={Boolean(github)}
-        scope={github?.scope}
         connectAction={async () => {
           "use server";
           await signIn("github", { redirectTo: "/settings" });
@@ -88,7 +86,6 @@ function ProviderCard({
   description,
   icon,
   connected,
-  scope,
   connectAction,
   disconnectAction,
   canDisconnect,
@@ -97,14 +94,13 @@ function ProviderCard({
   description: string;
   icon: React.ReactNode;
   connected: boolean;
-  scope?: string | null;
   connectAction: () => Promise<void>;
   disconnectAction: () => Promise<void>;
   canDisconnect: boolean;
 }) {
   return (
     <Card>
-      <CardHeader className="flex-row items-start gap-4 space-y-0">
+      <CardHeader className="flex-row items-center gap-4 space-y-0">
         <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-background">
           {icon}
         </div>
@@ -123,12 +119,7 @@ function ProviderCard({
           </span>
         )}
       </CardHeader>
-      <CardContent className="flex items-center justify-between">
-        <p className="truncate text-[11px] text-muted-foreground">
-          {connected
-            ? `scope: ${scope ?? "—"}`
-            : "Click connect to authorize this provider."}
-        </p>
+      <CardContent className="flex justify-end pt-2">
         {connected ? (
           <form action={disconnectAction}>
             <Button
