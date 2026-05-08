@@ -19,6 +19,7 @@ import {
   syncCalendarAction,
   type SyncCalendarResponse,
 } from "@/app/actions/calendar";
+import { updateMeetingAction } from "@/app/actions/meetings";
 import type {
   Meeting,
   Note,
@@ -75,6 +76,7 @@ interface StoreActions {
 
   resyncPRs: () => Promise<void>;
   syncCalendar: () => Promise<SyncCalendarResponse["result"]>;
+  updateMeeting: (id: string, patch: { workspace?: Workspace }) => Promise<void>;
 }
 
 type Store = StoreState & StoreActions;
@@ -330,6 +332,23 @@ export function StoreProvider({
     return result;
   }, []);
 
+  const updateMeeting = useCallback<StoreActions["updateMeeting"]>(
+    async (id, patch) => {
+      const before = meetings.find((m) => m.id === id);
+      setMeetings((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, ...patch } : m)),
+      );
+      try {
+        const real = await updateMeetingAction(id, patch);
+        setMeetings((prev) => prev.map((m) => (m.id === id ? real : m)));
+      } catch (err) {
+        if (before) setMeetings((prev) => prev.map((m) => (m.id === id ? before : m)));
+        throw err;
+      }
+    },
+    [meetings],
+  );
+
   const value = useMemo<Store>(
     () => ({
       tasks,
@@ -348,6 +367,7 @@ export function StoreProvider({
       saveRecap,
       resyncPRs,
       syncCalendar,
+      updateMeeting,
     }),
     [
       tasks,
@@ -366,6 +386,7 @@ export function StoreProvider({
       saveRecap,
       resyncPRs,
       syncCalendar,
+      updateMeeting,
     ],
   );
 

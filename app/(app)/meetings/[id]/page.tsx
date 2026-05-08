@@ -16,13 +16,20 @@ import { useStore } from "@/lib/store";
 import { Surface } from "@/components/ui/Surface";
 import { Badge } from "@/components/ui/Badge";
 import { SectionHeader } from "@/components/ui/SectionHeader";
-import { WORKSPACE_META, type Priority } from "@/lib/types";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { WORKSPACE_META, type Priority, type Workspace } from "@/lib/types";
 import { cn } from "@/lib/cn";
 
 export default function MeetingDetail() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { meetings, notes, tasks, createNote, createTask } = useStore();
+  const { meetings, notes, tasks, createNote, createTask, updateMeeting } =
+    useStore();
 
   const meeting = useMemo(() => meetings.find((m) => m.id === id), [meetings, id]);
   const meetingNotes = useMemo(
@@ -107,9 +114,39 @@ export default function MeetingDetail() {
             <Users className="h-3.5 w-3.5 text-ink-dim" />
             {meeting.attendees.length} attendees
           </span>
-          <Badge dot dotColor={WORKSPACE_META[meeting.workspace].color}>
-            {WORKSPACE_META[meeting.workspace].label}
-          </Badge>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-0.5 text-[11px] font-mono uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                title="Change workspace"
+              >
+                <span
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ background: WORKSPACE_META[meeting.workspace].color }}
+                />
+                {WORKSPACE_META[meeting.workspace].label}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-44">
+              {(Object.keys(WORKSPACE_META) as Workspace[]).map((w) => (
+                <DropdownMenuItem
+                  key={w}
+                  onClick={() => updateMeeting(meeting.id, { workspace: w })}
+                  className={cn(
+                    "flex items-center gap-2",
+                    w === meeting.workspace && "font-medium",
+                  )}
+                >
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ background: WORKSPACE_META[w].color }}
+                  />
+                  {WORKSPACE_META[w].label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 

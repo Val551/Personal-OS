@@ -6,21 +6,25 @@ Roadmap to transform the current prototype (in-memory mock data, no auth) into a
 
 ## 0. Current state (where we are)
 
-**Phases 1–5 are shipped.** Phase 6 (background jobs) is next.
+**Phases 1–6 are shipped.** Phase 7 (deployment) is next.
 
 What's running:
 
-- **Frontend**: Next.js 14 (App Router), TypeScript, Tailwind. 8 routes live: `/`, `/tasks`, `/meetings`, `/meetings/[id]`, `/notes`, `/github`, `/recap`, `/search`, plus `/settings` (account linking) and `/login`.
-- **Design system**: shadcn/ui. Reskinned from the original terminal/serif aesthetic. Dark + light theme via `next-themes`, toggle in topbar.
-- **Database**: Postgres on Neon, accessed via Prisma. Schema in `prisma/schema.prisma` covers `User`, `Account`, `Session`, `Task`, `Meeting`, `Note`, `PullRequest`, `Recap`, plus NextAuth's `VerificationToken`. No mock data anywhere; all seed/fixture files removed.
-- **Auth**: NextAuth.js v5 with Google (OIDC) + GitHub (OAuth). JWT session strategy. `lib/auth/tokens.ts` refreshes Google tokens via `oauth2.googleapis.com/token` when expired.
-- **Account linking**: in-app via `/settings` page. Custom `jwt` callback in `auth.ts` reads the existing JWT cookie before the OAuth callback completes, then force-merges the new provider's account onto the original user — works regardless of email match. Stale-cookie escape hatch at `/api/clear-session` (route handler, since server components can't clear cookies).
-- **State**: `lib/store.tsx` is now hydrated server-side from Prisma in `app/(app)/layout.tsx`, not from mocks. Server actions in `app/actions/*.ts` mutate; the store updates optimistically.
-- **Calendar sync**: `lib/integrations/google.ts` pulls `[today-1d, today+7d]` events via the Calendar API, upserts to `Meeting` keyed by `(userId, externalId)`, soft-deletes cancellations. Manual trigger via "Sync calendar" button on `/meetings`.
-- **PR sync**: `lib/integrations/github.ts` runs one GraphQL request fetching authored / review-requested / assigned buckets (50 each), buckets stale (>7d) post-fetch, replaces the user's PR rows. Triggered from `/github` Sync button.
-- **Priority engine**: `lib/priority/scoreTasks.ts` unchanged from V1 (already production-ready).
+- **Frontend**: Next.js 14 (App Router), TypeScript, Tailwind. 8 routes live: `/`, `/tasks`, `/meetings`, `/meetings/[id]`, `/notes`, `/github`, `/recap`, `/settings`, plus `/login`. (`/search` was deleted — `⌘K` palette in the topbar covers that.)
+- **Design system**: shadcn/ui. Reskinned from the original terminal/serif aesthetic. Light + dark theme via `next-themes`, toggle in topbar (no "system" option — just light/dark).
+- **Database**: Postgres on Neon, accessed via Prisma. Schema covers `User` (with `timezone`, `lastCalendarSyncAt`, `lastPRSyncAt`), `Account`, `Session`, `Task`, `Meeting`, `Note`, `PullRequest`, `Recap`, plus NextAuth's `VerificationToken`. No mock data anywhere; all seed/fixture files removed.
+- **Auth**: NextAuth.js v5 with Google (OIDC) + GitHub (OAuth). JWT session strategy. `lib/auth/tokens.ts` refreshes Google tokens when expired.
+- **Account linking**: `/login` is Google-only. GitHub is connected from `/settings` after sign-in. Custom `jwt` callback in `auth.ts` reads the existing JWT cookie inside the callback and force-merges the new provider's account onto the original user — works regardless of email match. Stale-cookie escape hatch at `/api/clear-session` (a route handler, since server components can't clear cookies). Note: the callback fires for both `account.type === "oauth"` and `"oidc"`; gating on `"oauth"` only would silently skip Google sign-ins.
+- **State**: `lib/store.tsx` is hydrated server-side from Prisma in `app/(app)/layout.tsx`. Server actions in `app/actions/*.ts` mutate; the store updates optimistically. Editors that get keystrokes (notes body, task drawer) debounce server saves at 500ms with flush-on-close so typing isn't laggy.
+- **Notes**: 2 types — `worklog` and `general`. The "+ new note" button opens a dropdown: **Blank note** creates a `general`, **Daily log** creates a `worklog` with a templated body (Date + Key Learnings / Mistakes & Lessons / Next Steps / Questions to Answer / What I Built Today). When a note's body parses as that template, the editor renders a structured form per section; otherwise it's a plain auto-grow textarea.
+- **Meetings**: `/meetings` is a Sun→Sat month grid (calendar view) with prev/next month nav and a "Today" jump. Click an event chip → `/meetings/[id]`. The detail page lets you reclassify the workspace (internship / school / personal / club) via a dropdown. Workspace edits survive future syncs because the upsert's `update` clause omits `workspace`.
+- **Calendar sync**: `lib/integrations/google.ts` pulls `[today-30d, today+180d]` events via the Calendar API, upserts to `Meeting` keyed by `(userId, externalId)`, soft-deletes cancellations. Triggered manually from `/meetings` and on cron (every 30 min).
+- **PR sync**: `lib/integrations/github.ts` runs one GraphQL request fetching authored / review-requested / assigned buckets (50 each), buckets stale (>7d) post-fetch, replaces the user's PR rows. Triggered manually from `/github` and on cron (hourly).
+- **Cron**: `app/api/cron/{sync-calendars,sync-prs,mark-stale-prs}/route.ts`. Bearer-auth gated by `CRON_SECRET`. `vercel.json` declares the schedules. Middleware excludes `/api/cron` so the bearer check is the only gate.
+- **Recap reminder**: server-rendered banner above the layout shows after 5pm user-local if no recap exists for today. User-local timezone captured on first dashboard load via `Intl.DateTimeFormat().resolvedOptions().timeZone` and stored on `User.timezone`.
+- **Priority engine**: `lib/priority/scoreTasks.ts` unchanged from V1. Numeric score is no longer rendered in the UI — it still drives task ordering.
 
-What's NOT yet built (Phase 6+): background jobs, deployment, search/full-text indexing.
+What's NOT yet built (Phase 7+): deployment, full-text search indexing, push-notification delivery.
 
 ---
 
@@ -323,64 +327,119 @@ Persist PR metadata so the dashboard doesn't block on a network call. Mark with 
 
 ---
 
-## 6. Phase 6 — Background jobs & cron 🔄 next
+## 6. Phase 6 — Background jobs & cron ✅ shipped
 
-**Goal**: things that should happen automatically — keep calendar + PRs fresh without the user having to click "Sync", and nudge for recap entry.
+**Goal**: keep calendar + PRs fresh without manual Sync clicks, and nudge for recap entry.
 
-### 6.1 Runtime choice
+### 6.1 Runtime
 
-Two reasonable options for a personal app:
+**Vercel Cron** + route handlers under `app/api/cron/*`. Each endpoint validates `Authorization: Bearer $CRON_SECRET` before doing anything. The middleware excludes `/api/cron` (alongside `/api/auth` and `/api/clear-session`), so the bearer check is the only gate. Inngest deferred — Vercel Cron's 60s budget is plenty at personal scale.
 
-- **Vercel Cron** — zero infra, declared in `vercel.json`, hits a route handler on a schedule. Great if/when we deploy to Vercel. Limitation: 60s execution cap on Hobby plan.
-- **Inngest** — separate service (free tier), durable retries, works locally via dev server. More moving parts but much better debuggability.
+### 6.2 Jobs (all implemented as `GET` handlers)
 
-Default plan: **Vercel Cron** for V1, with each job implemented as a route handler under `app/api/cron/*` that does its own per-user fan-out. Inngest only if cron jobs start needing > 60s or we want retries/observability.
-
-### 6.2 Jobs
-
-| Job | Endpoint | Cadence | What it does |
+| Job | Endpoint | Cadence (`vercel.json`) | What it does |
 |---|---|---|---|
-| `sync-calendars` | `POST /api/cron/sync-calendars` | every 30 min | Iterate active users, run `syncGoogleCalendar(userId)` for each |
-| `sync-prs` | `POST /api/cron/sync-prs` | hourly | Same fan-out for `syncGitHubPRs(userId)` |
-| `mark-stale-prs` | `POST /api/cron/mark-stale-prs` | daily 03:00 UTC | Re-bucket authored PRs where `updatedAt < now − 7d` to `stale` |
-| `recap-reminder` | `POST /api/cron/recap-reminder` | hourly | If user-local time is 17:00 and no recap exists for today, fire a notification (push or email — TBD per §6.5) |
+| `sync-calendars` | `/api/cron/sync-calendars` | `*/30 * * * *` | Picks users with a Google account whose `lastCalendarSyncAt` is null or older than 25 min, runs `syncGoogleCalendar(userId)` for each, updates the timestamp. Caps at 50 users per run. Per-user failures (e.g. insufficient OAuth scopes) get logged in the response payload and skipped — they don't fail the whole run. |
+| `sync-prs` | `/api/cron/sync-prs` | `0 * * * *` | Same pattern with `lastPRSyncAt` (55-min staleness threshold) |
+| `mark-stale-prs` | `/api/cron/mark-stale-prs` | `0 3 * * *` | Single SQL `updateMany` re-bucketing `authored` PRs older than 7d into `stale`. Returns count. |
 
-### 6.3 Securing cron endpoints
+Recap reminder is implemented in-app, not as a cron — see §6.5.
 
-Vercel Cron sends an `Authorization: Bearer <CRON_SECRET>` header. The endpoint validates it before doing work. Add `CRON_SECRET` to env. Reject all other callers with 401. (Locally, hit them via `curl -H "Authorization: Bearer $CRON_SECRET"`.)
+### 6.3 User timezones
 
-### 6.4 User timezones
+Captured on first dashboard load (not at sign-in time, since the OAuth callback can't see the browser's `Intl`). The layout passes `userRow.timezone` to a `<TimezoneSync>` client component which detects via `Intl.DateTimeFormat().resolvedOptions().timeZone` and posts to `updateTimezoneAction` only if missing. Stored in `User.timezone` as an IANA string.
 
-`recap-reminder` and any "user-local" timing needs each user's timezone. Capture on first sign-in via `Intl.DateTimeFormat().resolvedOptions().timeZone` and store on `User.timezone` (the column already exists in the schema). Run the cron hourly UTC and filter to users whose local hour == 17 right now.
+### 6.4 Sync window note
 
-### 6.5 Recap reminder delivery — open question
+`syncGoogleCalendar()` originally pulled an 8-day window (`-1d / +7d`), which left the calendar's month grid mostly empty. Widened to **30d past / 180d future** so navigating any reasonable month shows real data.
 
-Three options, in order of simplicity:
+### 6.5 Recap reminder — chose option #1 (in-app banner)
 
-1. **In-app banner only** — flag is set on the user, dashboard shows "Don't forget your recap" until they post one. Zero infra.
-2. **Email** — needs a transactional provider (Resend, Postmark). Easiest external add. ~5 min setup.
-3. **Web push** — needs a service worker, VAPID keys, user permission grant. Most polished UX, most setup.
+Lives at `components/recap-reminder-banner.tsx`. Server-rendered above the layout on every authed page. Shows when:
 
-Default: ship #1 in V1. Add #2 if the in-app reminder isn't enough. Defer #3 until the app is on a real domain.
+1. User has a `timezone` captured (otherwise hidden — no way to determine "5pm local")
+2. Current user-local hour ≥ 17
+3. No `Recap` row exists for `today` user-local
+
+The banner has a "Recap now" button → `/recap`. Disappears once a recap is submitted. No email/push delivery wired up — option #2/#3 from the original plan are deferred (defer until on a real domain).
 
 ### 6.6 Idempotency + concurrency
 
-- Both sync jobs are already idempotent at the row level (calendar uses upsert by `(userId, externalId)`; PRs use replace strategy in a single transaction).
-- One scheduled run shouldn't overlap a previous one. Cap each job at, say, 50s of execution; if there are more users than fit in that budget, paginate by `User.lastSyncedAt` and stop early.
-- Per-user safety: if a user's Google or GitHub token is invalid, log + skip — don't fail the whole run.
+- Calendar sync: `upsert` keyed on `(userId, externalId)`, so re-runs are no-ops. Cancelled events soft-deleted.
+- PR sync: `delete-then-insert` in a single transaction.
+- Workspace edits on meetings survive future calendar syncs because the upsert's `update` clause omits `workspace`.
+- Per-user failures don't break the run — the route handler accumulates `{ userId, ok, error }` in the response.
 
-### 6.7 Files to add
+### 6.7 Files added
 
 | Path | Change |
 |---|---|
-| `app/api/cron/sync-calendars/route.ts` | New — fan-out + bearer-auth gate |
-| `app/api/cron/sync-prs/route.ts` | New |
-| `app/api/cron/mark-stale-prs/route.ts` | New |
-| `app/api/cron/recap-reminder/route.ts` | New |
-| `vercel.json` | New — cron schedule declarations |
-| `lib/cron/auth.ts` | New — shared `assertCronCaller(req)` helper |
-| `prisma/schema.prisma` | Add `User.lastCalendarSyncAt`, `User.lastPRSyncAt` for pagination/observability |
-| Capture timezone on first sign-in | small tweak in `auth.ts` `events.signIn` |
+| `app/api/cron/sync-calendars/route.ts` | Fan-out + bearer-auth gate |
+| `app/api/cron/sync-prs/route.ts` | Fan-out + bearer-auth gate |
+| `app/api/cron/mark-stale-prs/route.ts` | One-shot SQL update |
+| `vercel.json` | Cron schedule declarations |
+| `lib/cron/auth.ts` | `assertCronCaller(req)` shared helper |
+| `prisma/schema.prisma` | Added `User.lastCalendarSyncAt`, `User.lastPRSyncAt`. Migration `20260508172622_phase6_cron_tracking`. |
+| `app/actions/profile.ts` | `updateTimezoneAction(timezone)` |
+| `components/timezone-sync.tsx` | Client-side IANA timezone detect + persist on first load |
+| `components/recap-reminder-banner.tsx` | Server-rendered nudge above the layout |
+| `app/(app)/layout.tsx` | Wired `TimezoneSync` + `RecapReminderBanner`, expanded user query to include `timezone` |
+| `middleware.ts` | Marked `/api/cron` public so bearer auth is the only gate |
+| `.env.example` + `.env` | Added `CRON_SECRET` |
+
+### 6.8 Local cron testing
+
+```bash
+SECRET=$(grep ^CRON_SECRET .env | sed -E 's/CRON_SECRET="(.+)"/\1/')
+curl -H "Authorization: Bearer $SECRET" http://localhost:3000/api/cron/sync-calendars
+curl -H "Authorization: Bearer $SECRET" http://localhost:3000/api/cron/sync-prs
+curl -H "Authorization: Bearer $SECRET" http://localhost:3000/api/cron/mark-stale-prs
+```
+
+Vercel Cron only fires once deployed — locally hit endpoints with curl above when testing.
+
+---
+
+## 6.5. UX cleanup pass ✅ shipped
+
+After Phase 6, did a focused pass to strip the prototype's "look at me" decoration:
+
+- **Sidebar**: dropped the fake "system status" panel (calendar/github/priority indicators), the `WORKSPACE` section label, the `v0.1 · personal` brand subtext. Removed the `/search` nav item.
+- **Topbar**: dropped the live clock and breadcrumb prefix. Just shows current page name.
+- **Dashboard**: removed the `uptime XXm` counter (state, ref, useEffect — all gone), `on track` badge, `yyyy-MM-dd · HH:mm` timestamp label, decorative `.` after the day name, the `priority engine · top recommendation` heading, the `hero-glow scanlines` decorative effects, the raw priority `score` integer (engine still drives ordering, the number just isn't displayed).
+- **All page headers**: removed the orange `.` after `Notes`, `Tasks`, `Meetings`, `Recap`, `Pull requests`.
+- **Empty states + placeholders**: every `// xxx` terminal-comment string rewritten in plain English.
+- **Notes**: collapsed 4 types (`meeting / worklog / general / journal`) to 2 (`worklog / general`). Migration `20260508150059_simplify_note_types` renamed the enum and reassigned existing rows. Removed `meeting` as the default note type from the meeting detail page (now `general`). Notes still link to meetings via `linkedMeetingId`, no functionality lost.
+- **Theme toggle**: removed "System" item — just Light/Dark.
+- **Settings**: removed scope display for Google + GitHub. Cards just show provider name, short description, connection status, Connect/Disconnect.
+- **`/search` route**: deleted entirely. `⌘K` palette in topbar covers it.
+- **Mock data**: `lib/mock/seed.ts` and `prisma/seed.ts` deleted, `prisma.seed` config removed from `package.json`.
+
+---
+
+## 6.6. Editor performance + structured daily logs ✅ shipped
+
+Prototype had inline `onChange={(e) => updateXxx(...)}` on every text input → a Prisma write + Next.js round-trip per keystroke → notes were unusable to type into. Two fixes:
+
+- **Debounced server saves**: notes editor and tasks drawer now keep `titleDraft` / `bodyDraft` / `notesDraft` local state. A `useEffect` 500ms after the last keystroke pushes the diff up. `flushAndSelect()` flushes pending edits before switching to another note/task so the last <500ms of typing isn't lost.
+- **`AutoGrowTextarea` component**: `components/notes/auto-grow-textarea.tsx`. Resizes via `scrollHeight` on each value change so the page (not the textarea) is what scrolls. Replaced the prototype's `flex-1` textarea inside a `min-h-[560px]` Surface, which was causing internal trapped scrollbars.
+
+Daily-log structured editor: `components/notes/daily-log-editor.tsx`. When a note is `worklog`-typed and its body parses as the daily-log template, the editor renders 5 labeled sections (Key Learnings / Mistakes & Lessons / Next Steps / Questions to Answer / What I Built Today) instead of one big textarea. Round-trips to and from markdown via `parseDailyLog` / `serializeDailyLog` in `lib/notes/templates.ts`. Falls back to plain auto-grow textarea if the template structure is broken.
+
+---
+
+## 6.7. Calendar UI + meeting reclassification ✅ shipped
+
+`/meetings` redesigned from a list view into a Sun→Sat **month grid**:
+
+- Header with prev/next chevrons + "Today" jump button
+- Weekday header row, 6-row day grid
+- Each day cell: day number top-right (today is a filled circle), up to 3 event chips with workspace-color dots, "+N more" overflow
+- Click an event chip → `/meetings/[id]`
+- Workspace legend at the bottom
+- Sync calendar button preserved in the header
+
+Meeting reclassification: detail page's static workspace badge is now a `DropdownMenu` with all four workspaces. `app/actions/meetings.ts#updateMeetingAction` ownership-checks via `updateMany` then `findUniqueOrThrow`. Store has an optimistic `updateMeeting()` method. Workspace edits persist across syncs because `lib/integrations/google.ts` only sets `workspace` on `create`, never on `update`.
 
 ---
 
@@ -452,15 +511,22 @@ These map to PRD §9 — answers shape Phase 4–6:
 
 ## 11. Suggested sequencing (8-week plan)
 
-| Week | Focus |
-|---|---|
-| 1 | Phase 1 — Prisma schema + migrations. Convert seed to DB. App still uses `useStore`, but reads come from Prisma via a thin adapter. |
-| 2 | Phase 2 — NextAuth with Google + GitHub. Sign-in works, but no integrations yet. |
-| 3 | Phase 3 — server actions + React Query. Replace `useStore` everywhere. |
-| 4 | Phase 4 — calendar sync (polling, no webhooks). Live meeting data. |
-| 5 | Phase 5 — GitHub PR sync. Live PR data. |
-| 6 | Phase 6 — background jobs. Cadence + recap reminders. |
-| 7 | Phase 7 — deploy to Vercel + Neon. Real env. |
-| 8 | Polish, error boundaries, observability, edge cases. Ship. |
+| Week | Focus | Status |
+|---|---|---|
+| 1 | Phase 1 — Prisma schema + migrations. Convert seed to DB. | ✅ shipped |
+| 2 | Phase 2 — NextAuth with Google + GitHub. Sign-in works. | ✅ shipped (Google primary; GitHub linked from `/settings`) |
+| 3 | Phase 3 — server actions + replace `useStore` reads with server-hydrated data. | ✅ shipped (skipped React Query — context store + server actions instead) |
+| 4 | Phase 4 — calendar sync (polling, no webhooks). | ✅ shipped (window: 30d past / 180d future) |
+| 5 | Phase 5 — GitHub PR sync. | ✅ shipped (replace strategy, GraphQL one-shot) |
+| 6 | Phase 6 — background jobs + recap reminder. | ✅ shipped (Vercel Cron + in-app banner) |
+| 7 | Phase 7 — deploy to Vercel + Neon. Real env. | 🔄 next |
+| 8 | Polish, error boundaries, observability, edge cases. Ship. |  |
 
-The frontend, design system, and priority engine **don't change** through any of this — they're already in their final form.
+In addition to the original plan, three unscheduled passes happened during V2:
+
+- **shadcn/ui reskin** — replaced the prototype's terminal-style design system with shadcn primitives + CSS variables, light/dark theme, neutral palette
+- **UX cleanup pass** — stripped decorative `// xxx` placeholders, `score` integers, fake status panels, decorative periods, etc. (§6.5)
+- **Editor performance fix + daily-log structured editor** — debounced server saves on note/task editors, auto-grow textareas, structured daily-log template (§6.6)
+- **Calendar UI rewrite + meeting reclassification** — month grid view replacing the list view; per-meeting workspace dropdown that survives sync (§6.7)
+
+The priority engine **didn't change** — already in its final form.

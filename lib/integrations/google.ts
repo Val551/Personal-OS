@@ -3,8 +3,12 @@ import { prisma } from "@/lib/db";
 import { getValidAccessToken } from "@/lib/auth/tokens";
 import type { Workspace } from "@/lib/types";
 
-const WINDOW_PAST_DAYS = 1;
-const WINDOW_FUTURE_DAYS = 7;
+// Sync covers the last 30 days through the next 180 days. Wide enough that
+// the calendar's month view always has data for whatever month you navigate
+// to (assuming you sync occasionally). Still small enough that one sync
+// finishes in seconds for personal-volume calendars.
+const WINDOW_PAST_DAYS = 30;
+const WINDOW_FUTURE_DAYS = 180;
 
 export interface SyncResult {
   upserted: number;
