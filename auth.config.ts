@@ -17,8 +17,11 @@ export default {
       return token;
     },
     async session({ session, token }) {
-      if (session.user && token.uid) {
-        session.user.id = token.uid as string;
+      // Prefer token.uid (set by our custom callback), fall back to token.sub
+      // (set automatically by NextAuth) so legacy cookies still resolve.
+      const id = (token.uid as string | undefined) ?? token.sub;
+      if (session.user && id) {
+        session.user.id = id;
       }
       return session;
     },

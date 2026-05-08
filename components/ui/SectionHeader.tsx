@@ -1,4 +1,4 @@
-import { cn } from "@/lib/cn";
+import { cn } from "@/lib/utils";
 
 export function SectionHeader({
   comment,
@@ -16,12 +16,14 @@ export function SectionHeader({
   return (
     <div className={cn("flex items-end justify-between", className)}>
       <div>
-        <p className="comment-label">{comment}</p>
+        <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          {comment}
+        </p>
         {title !== undefined && (
-          <h2 className="mt-1 font-display text-[26px] leading-none tracking-tight-display text-ink">
+          <h2 className="mt-1 text-lg font-semibold tracking-tight">
             {title}
             {count !== undefined && (
-              <span className="ml-2 align-middle font-mono text-[12px] tracking-normal text-ink-dim">
+              <span className="ml-2 align-middle text-xs font-normal text-muted-foreground">
                 {count}
               </span>
             )}

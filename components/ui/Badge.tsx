@@ -1,42 +1,81 @@
-import { cn } from "@/lib/cn";
+import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
 
-export function Badge({
-  children,
-  className,
-  tone = "neutral",
-  dot,
-  dotColor,
-}: {
-  children: React.ReactNode;
-  className?: string;
-  tone?: "neutral" | "amber" | "urgent" | "warn" | "ok" | "link";
+import { cn } from "@/lib/utils";
+
+const badgeVariants = cva(
+  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  {
+    variants: {
+      variant: {
+        default:
+          "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",
+        secondary:
+          "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        destructive:
+          "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
+        outline: "text-foreground",
+      },
+    },
+    defaultVariants: { variant: "default" },
+  },
+);
+
+// Legacy `tone` API used across the app's existing pages — maps onto the new
+// shadcn-flavored variant set so callers don't need to migrate at once.
+type LegacyTone = "neutral" | "amber" | "urgent" | "warn" | "ok" | "link";
+
+export interface BadgeProps
+  extends Omit<React.HTMLAttributes<HTMLDivElement>, "color">,
+    VariantProps<typeof badgeVariants> {
+  tone?: LegacyTone;
   dot?: boolean;
   dotColor?: string;
-}) {
-  const toneCls = {
-    neutral: "border-hairline bg-elevated/60 text-ink-muted",
-    amber: "border-amber/30 bg-amber/10 text-amber",
-    urgent: "border-urgent/30 bg-urgent/10 text-urgent",
-    warn: "border-warn/30 bg-warn/10 text-warn",
-    ok: "border-ok/30 bg-ok/10 text-ok",
-    link: "border-link/30 bg-link/10 text-link",
-  }[tone];
+}
 
+const TONE_TO_CLASS: Record<LegacyTone, string> = {
+  neutral: "border bg-secondary text-secondary-foreground",
+  amber: "border bg-secondary text-foreground",
+  urgent: "border-destructive/30 bg-destructive/10 text-destructive",
+  warn: "border-warn/30 bg-warn/10 text-warn",
+  ok: "border-ok/30 bg-ok/10 text-ok",
+  link: "border-primary/30 bg-primary/10 text-primary",
+};
+
+function Badge({
+  className,
+  variant,
+  tone,
+  dot,
+  dotColor,
+  children,
+  ...props
+}: BadgeProps) {
+  if (tone) {
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md border px-1.5 py-px font-mono text-[10px] uppercase tracking-wider",
+          TONE_TO_CLASS[tone],
+          className,
+        )}
+        {...(props as React.HTMLAttributes<HTMLSpanElement>)}
+      >
+        {dot && (
+          <span
+            className="inline-block h-1.5 w-1.5 rounded-full"
+            style={{ background: dotColor ?? "currentColor" }}
+          />
+        )}
+        {children}
+      </span>
+    );
+  }
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border px-1.5 py-px font-mono text-[10px] uppercase tracking-wider",
-        toneCls,
-        className,
-      )}
-    >
-      {dot && (
-        <span
-          className="inline-block h-1.5 w-1.5 rounded-full"
-          style={{ background: dotColor ?? "currentColor" }}
-        />
-      )}
+    <div className={cn(badgeVariants({ variant }), className)} {...props}>
       {children}
-    </span>
+    </div>
   );
 }
+
+export { Badge, badgeVariants };

@@ -1,17 +1,24 @@
-import { cn } from "@/lib/cn";
+import { cn } from "@/lib/utils";
 import { forwardRef } from "react";
 
+// Shadcn-flavored compat shim. Keeps the existing API used across pages.
 export const Surface = forwardRef<
   HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement> & { tone?: "panel" | "elevated" | "floating" }
+  React.HTMLAttributes<HTMLDivElement> & {
+    tone?: "panel" | "elevated" | "floating";
+  }
 >(function Surface({ className, tone = "panel", ...props }, ref) {
   const toneCls =
     tone === "floating"
-      ? "bg-floating shadow-floating border-edge"
+      ? "bg-popover shadow-lg"
       : tone === "elevated"
-        ? "bg-elevated shadow-elevated border-hairline"
-        : "bg-panel border-hairline";
+        ? "bg-card shadow-sm"
+        : "bg-card";
   return (
-    <div ref={ref} className={cn("rounded-xl border", toneCls, className)} {...props} />
+    <div
+      ref={ref}
+      className={cn("rounded-lg border", toneCls, className)}
+      {...props}
+    />
   );
 });

@@ -1,6 +1,15 @@
 import { signIn, auth } from "@/auth";
 import { redirect } from "next/navigation";
-import { ArrowRight, Github, Sparkles } from "lucide-react";
+import { prisma } from "@/lib/db";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 export default async function LoginPage({
   searchParams,
@@ -8,106 +17,72 @@ export default async function LoginPage({
   searchParams: { from?: string };
 }) {
   const session = await auth();
-  if (session) redirect(searchParams.from ?? "/");
+  if (session?.user?.id) {
+    const stillExists = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { id: true },
+    });
+    if (stillExists) {
+      redirect(searchParams.from ?? "/");
+    }
+    // Stale cookie — bounce through the route handler that can actually
+    // clear it, then come back to /login fresh.
+    redirect("/api/clear-session");
+  }
 
   const callbackUrl = searchParams.from ?? "/";
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-base px-6 py-16">
-      {/* Ambient glow */}
-      <div
-        className="pointer-events-none absolute inset-0 z-0"
-        style={{
-          background:
-            "radial-gradient(ellipse 70% 50% at 30% 0%, rgba(244,184,96,0.10), transparent 60%), radial-gradient(ellipse 60% 50% at 80% 100%, rgba(91,163,168,0.08), transparent 60%)",
-        }}
-      />
-
-      <div className="relative z-10 flex w-full max-w-[460px] flex-col gap-8">
-        {/* Brand */}
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-md bg-elevated shadow-elevated">
-            <span className="font-mono text-[13px] tracking-tighter text-amber">{"//"}</span>
+    <div className="flex min-h-screen items-center justify-center bg-background px-6 py-16">
+      <div className="flex w-full max-w-md flex-col gap-8">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-9 w-9 items-center justify-center rounded-md bg-foreground text-background">
+            <span className="text-sm font-semibold tracking-tighter">eo</span>
           </div>
           <div className="flex flex-col leading-none">
-            <span className="font-display text-[20px] italic tracking-tight text-ink">
-              engineering<span className="text-amber">.os</span>
+            <span className="text-base font-semibold tracking-tight">
+              engineering.os
             </span>
-            <span className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.22em] text-ink-dim">
+            <span className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">
               v0.1 · personal
             </span>
           </div>
         </div>
 
-        {/* Headline */}
-        <div className="flex flex-col gap-3">
-          <p className="comment-label">authenticate</p>
-          <h1 className="font-display text-[44px] leading-[0.98] tracking-tightest-display text-ink">
-            Sign in<span className="text-amber">.</span>
-          </h1>
-          <p className="font-mono text-[12.5px] leading-relaxed text-ink-muted">
-            Google for identity &amp; calendar. GitHub linked for pull-request
-            metadata. Tokens stay on your machine.
-          </p>
-        </div>
-
-        {/* Provider buttons */}
-        <div className="flex flex-col gap-2.5">
-          <form
-            action={async () => {
-              "use server";
-              await signIn("google", { redirectTo: callbackUrl });
-            }}
-          >
-            <button
-              type="submit"
-              className="group flex w-full items-center justify-between rounded-md border border-edge bg-elevated px-4 py-3 transition-all duration-150 ease-spring hover:-translate-y-px hover:border-amber/40 hover:shadow-glow active:translate-y-0"
+        <Card>
+          <CardHeader className="space-y-1">
+            <CardTitle className="text-2xl tracking-tight">Sign in</CardTitle>
+            <CardDescription>
+              Google handles identity and calendar access.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            <form
+              action={async () => {
+                "use server";
+                await signIn("google", { redirectTo: callbackUrl });
+              }}
             >
-              <span className="flex items-center gap-3">
-                <span className="flex h-6 w-6 items-center justify-center rounded-sm bg-base">
-                  <GoogleLogo />
-                </span>
-                <span className="text-[13.5px] text-ink">Continue with Google</span>
-              </span>
-              <ArrowRight className="h-3.5 w-3.5 text-ink-dim transition-all group-hover:translate-x-0.5 group-hover:text-amber" />
-            </button>
-          </form>
+              <Button
+                type="submit"
+                variant="outline"
+                className="w-full justify-start gap-3"
+              >
+                <GoogleLogo />
+                Continue with Google
+              </Button>
+            </form>
 
-          <form
-            action={async () => {
-              "use server";
-              await signIn("github", { redirectTo: callbackUrl });
-            }}
-          >
-            <button
-              type="submit"
-              className="group flex w-full items-center justify-between rounded-md border border-hairline bg-panel px-4 py-3 transition-all duration-150 ease-spring hover:-translate-y-px hover:border-edge active:translate-y-0"
-            >
-              <span className="flex items-center gap-3">
-                <Github className="h-5 w-5 text-ink-muted" />
-                <span className="text-[13.5px] text-ink">Continue with GitHub</span>
-              </span>
-              <ArrowRight className="h-3.5 w-3.5 text-ink-dim transition-all group-hover:translate-x-0.5 group-hover:text-amber" />
-            </button>
-          </form>
-        </div>
-
-        <div className="flex flex-col gap-2 rounded-md border border-hairline bg-elevated/40 p-3">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-3 w-3 text-amber" />
-            <span className="comment-label">first-time setup</span>
-          </div>
-          <p className="font-mono text-[11px] leading-relaxed text-ink-dim">
-            Sign in once with each provider to grant calendar + PR access. You can
-            link both accounts to the same identity from settings later.
-          </p>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-ink-faint">
-          <span>{"// localhost · dev"}</span>
-          <span className="caret">{"$"}</span>
-        </div>
+            <p className="pt-1 text-xs text-muted-foreground">
+              You can connect GitHub from{" "}
+              <span className="font-medium text-foreground">Settings</span>{" "}
+              after signing in.
+            </p>
+          </CardContent>
+          <CardFooter className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            localhost · dev
+          </CardFooter>
+        </Card>
       </div>
     </div>
   );
@@ -115,7 +90,7 @@ export default async function LoginPage({
 
 function GoogleLogo() {
   return (
-    <svg viewBox="0 0 18 18" className="h-3.5 w-3.5">
+    <svg viewBox="0 0 18 18" className="h-4 w-4">
       <path
         d="M17.64 9.205c0-.638-.057-1.252-.164-1.841H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"
         fill="#4285F4"

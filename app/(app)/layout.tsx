@@ -21,6 +21,12 @@ export default async function AuthedLayout({
 
   const userId = session.user.id;
 
+  const userExists = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true },
+  });
+  if (!userExists) redirect("/api/clear-session");
+
   const [tasksRaw, meetingsRaw, notesRaw, prsRaw, recapsRaw] = await Promise.all([
     prisma.task.findMany({
       where: { userId },

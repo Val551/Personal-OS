@@ -61,12 +61,19 @@ export default function GitHubPage() {
     return out;
   }, [prs]);
 
+  const [syncError, setSyncError] = useState<string | null>(null);
+
   const handleRefresh = async () => {
     setRefreshing(true);
-    await new Promise((r) => setTimeout(r, 600));
-    resyncPRs();
-    setLastSync(new Date());
-    setRefreshing(false);
+    setSyncError(null);
+    try {
+      await resyncPRs();
+      setLastSync(new Date());
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : "sync failed");
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const totalAttention = grouped["review-requested"].length + grouped.stale.length;
@@ -86,10 +93,16 @@ export default function GitHubPage() {
         </div>
         <div className="flex items-center gap-3">
           <span className="font-mono text-[11px] text-ink-dim">
-            last synced{" "}
-            <span className="text-ink-muted" suppressHydrationWarning>
-              {format(lastSync, "HH:mm:ss")}
-            </span>
+            {syncError ? (
+              <span className="text-urgent">error · {syncError}</span>
+            ) : (
+              <>
+                last synced{" "}
+                <span className="text-ink-muted" suppressHydrationWarning>
+                  {format(lastSync, "HH:mm:ss")}
+                </span>
+              </>
+            )}
           </span>
           <button
             onClick={handleRefresh}

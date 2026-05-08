@@ -11,7 +11,8 @@ export default auth((req) => {
   const isAuthed = !!req.auth;
   const isPublic =
     nextUrl.pathname.startsWith("/login") ||
-    nextUrl.pathname.startsWith("/api/auth");
+    nextUrl.pathname.startsWith("/api/auth") ||
+    nextUrl.pathname.startsWith("/api/clear-session");
 
   if (!isAuthed && !isPublic) {
     const url = new URL("/login", nextUrl);
@@ -29,5 +30,10 @@ export default auth((req) => {
 });
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.png$).*)"],
+  // Exclude /api/clear-session so the middleware's auth() doesn't re-sign
+  // the JWT cookie before the route handler can delete it (the resulting
+  // double Set-Cookie causes some browsers to keep the re-issued cookie).
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|api/clear-session|.*\\.png$).*)",
+  ],
 };

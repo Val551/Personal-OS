@@ -4,15 +4,17 @@ import { usePathname } from "next/navigation";
 import { Search } from "lucide-react";
 import { format } from "date-fns";
 import { useEffect, useState } from "react";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { Separator } from "@/components/ui/separator";
 
 const SEGMENT_LABEL: Record<string, string> = {
-  "": "today",
-  tasks: "tasks",
-  meetings: "meetings",
-  notes: "notes",
-  github: "github",
-  recap: "recap",
-  search: "search",
+  "": "Today",
+  tasks: "Tasks",
+  meetings: "Meetings",
+  notes: "Notes",
+  github: "GitHub",
+  recap: "Recap",
+  search: "Search",
 };
 
 export function Topbar({ onOpenCmd }: { onOpenCmd: () => void }) {
@@ -30,37 +32,42 @@ export function Topbar({ onOpenCmd }: { onOpenCmd: () => void }) {
   const top = segments[0] ?? "";
 
   return (
-    <header className="sticky top-0 z-20 flex h-12 items-center gap-3 border-b border-hairline bg-base/80 px-6 backdrop-blur-md">
-      <div className="flex items-center gap-2 font-mono text-[11px]">
-        <span className="text-ink-dim">~/</span>
-        <span className="text-ink-muted">engineering-os</span>
-        <span className="text-ink-faint">/</span>
-        <span className="text-amber">{SEGMENT_LABEL[top] ?? top}</span>
+    <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-background/80 px-6 backdrop-blur">
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-muted-foreground">engineering-os</span>
+        <span className="text-muted-foreground/50">/</span>
+        <span className="font-medium">{SEGMENT_LABEL[top] ?? top}</span>
         {segments[1] && (
           <>
-            <span className="text-ink-faint">/</span>
-            <span className="text-ink-muted">{segments[1]}</span>
+            <span className="text-muted-foreground/50">/</span>
+            <span className="text-muted-foreground">{segments[1]}</span>
           </>
         )}
-        <span className="caret -ml-1" />
       </div>
 
       <div className="flex-1" />
 
       <button
         onClick={onOpenCmd}
-        className="group flex items-center gap-2 rounded-md border border-hairline bg-elevated/60 px-2.5 py-1 text-[12px] text-ink-muted transition-colors duration-150 hover:border-edge hover:bg-elevated hover:text-ink active:scale-[0.99]"
+        className="group flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
-        <Search className="h-3.5 w-3.5 text-ink-dim group-hover:text-ink-muted" />
-        <span>Search anything…</span>
-        <span className="mx-1 h-3 w-px bg-hairline" />
-        <kbd className="kbd">⌘ K</kbd>
+        <Search className="h-3.5 w-3.5" />
+        <span>Search…</span>
+        <kbd className="ml-2 hidden items-center gap-0.5 rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-flex">
+          ⌘K
+        </kbd>
       </button>
 
-      <div className="flex items-center gap-2 font-mono text-[11px] text-ink-muted">
-        <span className="status-dot bg-amber animate-pulse-dot" />
-        <span suppressHydrationWarning>{time || "—"}</span>
-      </div>
+      <Separator orientation="vertical" className="h-6" />
+
+      <span
+        suppressHydrationWarning
+        className="hidden text-xs text-muted-foreground md:inline"
+      >
+        {time || "—"}
+      </span>
+
+      <ThemeToggle />
     </header>
   );
 }
