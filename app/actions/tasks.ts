@@ -44,9 +44,9 @@ export interface UpdateTaskInput {
 export async function updateTaskAction(
   id: string,
   patch: UpdateTaskInput,
-): Promise<Task> {
+): Promise<Task | null> {
   const userId = await requireUserId();
-  const updated = await prisma.task.update({
+  const result = await prisma.task.updateMany({
     where: { id, userId },
     data: {
       ...patch,
@@ -57,15 +57,19 @@ export async function updateTaskAction(
             ? null
             : new Date(patch.dueAt),
     },
+  });
+  if (result.count === 0) return null;
+  const updated = await prisma.task.findUnique({
+    where: { id },
     include: { linkedNotes: true },
   });
-  return serializeTask(updated);
+  return updated ? serializeTask(updated) : null;
 }
 
-export async function toggleTaskCompleteAction(id: string): Promise<Task> {
+export async function toggleTaskCompleteAction(id: string): Promise<Task | null> {
   const userId = await requireUserId();
   const existing = await prisma.task.findFirst({ where: { id, userId } });
-  if (!existing) throw new Error("Task not found");
+  if (!existing) return null;
 
   const isDone = existing.status === "done";
   const updated = await prisma.task.update({
@@ -82,20 +86,24 @@ export async function toggleTaskCompleteAction(id: string): Promise<Task> {
 export async function setTaskStatusAction(
   id: string,
   status: TaskStatus,
-): Promise<Task> {
+): Promise<Task | null> {
   const userId = await requireUserId();
-  const updated = await prisma.task.update({
+  const result = await prisma.task.updateMany({
     where: { id, userId },
     data: {
       status,
       completedAt: status === "done" ? new Date() : null,
     },
+  });
+  if (result.count === 0) return null;
+  const updated = await prisma.task.findUnique({
+    where: { id },
     include: { linkedNotes: true },
   });
-  return serializeTask(updated);
+  return updated ? serializeTask(updated) : null;
 }
 
 export async function deleteTaskAction(id: string): Promise<void> {
   const userId = await requireUserId();
-  await prisma.task.delete({ where: { id, userId } });
+  await prisma.task.deleteMany({ where: { id, userId } });
 }

@@ -40,17 +40,24 @@ export interface UpdateNoteInput {
 export async function updateNoteAction(
   id: string,
   patch: UpdateNoteInput,
-): Promise<Note> {
+): Promise<Note | null> {
   const userId = await requireUserId();
-  const updated = await prisma.note.update({
+  // updateMany doesn't throw when no row matches — protects against debounced
+  // saves firing on a stale id (note was deleted, or still-optimistic temp id).
+  const result = await prisma.note.updateMany({
     where: { id, userId },
     data: patch,
+  });
+  if (result.count === 0) return null;
+  const updated = await prisma.note.findUnique({
+    where: { id },
     include: { linkedTasks: true },
   });
-  return serializeNote(updated);
+  return updated ? serializeNote(updated) : null;
 }
 
 export async function deleteNoteAction(id: string): Promise<void> {
   const userId = await requireUserId();
-  await prisma.note.delete({ where: { id, userId } });
+  // deleteMany is idempotent — safe against double-clicks and stale ids.
+  await prisma.note.deleteMany({ where: { id, userId } });
 }

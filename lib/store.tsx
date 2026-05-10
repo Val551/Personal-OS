@@ -87,6 +87,13 @@ function rid(prefix: string) {
   return `${prefix}_temp_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+// Optimistic ids carry "_temp_" until the server returns a real cuid. Any
+// update/delete dispatched against a still-pending temp id has nothing to
+// hit on the server, so we skip the round-trip entirely.
+function isTempId(id: string) {
+  return id.includes("_temp_");
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -153,6 +160,7 @@ export function StoreProvider({
     setTasks((prev) =>
       prev.map((t) => (t.id === id ? { ...t, ...patch, updatedAt: nowIso() } : t)),
     );
+    if (isTempId(id)) return;
     try {
       // Map `Partial<Task>` to the server's UpdateTaskInput shape (only safe fields).
       const real = await updateTaskAction(id, {
@@ -163,7 +171,7 @@ export function StoreProvider({
         status: patch.status,
         dueAt: patch.dueAt === undefined ? undefined : (patch.dueAt ?? null),
       });
-      setTasks((prev) => prev.map((t) => (t.id === id ? real : t)));
+      if (real) setTasks((prev) => prev.map((t) => (t.id === id ? real : t)));
     } catch (err) {
       if (before) setTasks((prev) => prev.map((t) => (t.id === id ? before : t)));
       throw err;
@@ -185,9 +193,10 @@ export function StoreProvider({
           };
         }),
       );
+      if (isTempId(id)) return;
       try {
         const real = await toggleTaskCompleteAction(id);
-        setTasks((prev) => prev.map((t) => (t.id === id ? real : t)));
+        if (real) setTasks((prev) => prev.map((t) => (t.id === id ? real : t)));
       } catch (err) {
         if (before) setTasks((prev) => prev.map((t) => (t.id === id ? before : t)));
         throw err;
@@ -211,9 +220,10 @@ export function StoreProvider({
             : t,
         ),
       );
+      if (isTempId(id)) return;
       try {
         const real = await setTaskStatusAction(id, status);
-        setTasks((prev) => prev.map((t) => (t.id === id ? real : t)));
+        if (real) setTasks((prev) => prev.map((t) => (t.id === id ? real : t)));
       } catch (err) {
         if (before) setTasks((prev) => prev.map((t) => (t.id === id ? before : t)));
         throw err;
@@ -225,6 +235,7 @@ export function StoreProvider({
   const deleteTask = useCallback<StoreActions["deleteTask"]>(async (id) => {
     const before = tasks.find((t) => t.id === id);
     setTasks((prev) => prev.filter((t) => t.id !== id));
+    if (isTempId(id)) return;
     try {
       await deleteTaskAction(id);
     } catch (err) {
@@ -279,13 +290,14 @@ export function StoreProvider({
     setNotes((prev) =>
       prev.map((n) => (n.id === id ? { ...n, ...patch, updatedAt: nowIso() } : n)),
     );
+    if (isTempId(id)) return;
     try {
       const real = await updateNoteAction(id, {
         title: patch.title,
         body: patch.body,
         type: patch.type,
       });
-      setNotes((prev) => prev.map((n) => (n.id === id ? real : n)));
+      if (real) setNotes((prev) => prev.map((n) => (n.id === id ? real : n)));
     } catch (err) {
       if (before) setNotes((prev) => prev.map((n) => (n.id === id ? before : n)));
       throw err;
@@ -295,6 +307,7 @@ export function StoreProvider({
   const deleteNote = useCallback<StoreActions["deleteNote"]>(async (id) => {
     const before = notes.find((n) => n.id === id);
     setNotes((prev) => prev.filter((n) => n.id !== id));
+    if (isTempId(id)) return;
     try {
       await deleteNoteAction(id);
     } catch (err) {
