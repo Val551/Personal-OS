@@ -1,5 +1,4 @@
 {
-  "//": "sync-calendars and sync-prs run from .github/workflows/cron.yml because Vercel Hobby caps cron at daily.",
   "crons": [
     { "path": "/api/cron/mark-stale-prs", "schedule": "0 3 * * *" }
   ]
